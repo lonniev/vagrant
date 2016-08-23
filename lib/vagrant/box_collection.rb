@@ -1,4 +1,5 @@
 require "digest/sha1"
+require "fileutils"
 require "monitor"
 require "tmpdir"
 
@@ -12,7 +13,9 @@ module Vagrant
   # for accessing/finding individual boxes, adding new boxes, or deleting
   # boxes.
   class BoxCollection
-    TEMP_PREFIX = "vagrant-box-add-temp-"
+    TEMP_PREFIX = "vagrant-box-add-temp-".freeze
+    VAGRANT_SLASH = "-VAGRANTSLASH-".freeze
+    VAGRANT_COLON = "-VAGRANTCOLON-".freeze
 
     # The directory where the boxes in this collection are stored.
     #
@@ -274,17 +277,16 @@ module Vagrant
           next if versiondir.basename.to_s.start_with?(".")
 
           version = versiondir.basename.to_s
-          Gem::Version.new(version)
         end.compact
 
         # Traverse through versions with the latest version first
         versions.sort.reverse.each do |v|
-          if !requirements.all? { |r| r.satisfied_by?(v) }
+          if !requirements.all? { |r| r.satisfied_by?(Gem::Version.new(v)) }
             # Unsatisfied version requirements
             next
           end
 
-          versiondir = box_directory.join(v.to_s)
+          versiondir = box_directory.join(v)
           providers.each do |provider|
             provider_dir = versiondir.join(provider.to_s)
             next if !provider_dir.directory?
@@ -301,7 +303,7 @@ module Vagrant
             end
 
             return Box.new(
-              name, provider, v.to_s, provider_dir,
+              name, provider, v, provider_dir,
               metadata_url: metadata_url,
             )
           end
@@ -346,6 +348,14 @@ module Vagrant
       end
     end
 
+    # Cleans the directory for a box by removing the folders that are
+    # empty.
+    def clean(name)
+      return false if exists?(name)
+      path = File.join(directory, dir_name(name))
+      FileUtils.rm_rf(path)
+    end
+
     protected
 
     # Returns the directory name for the box of the given name.
@@ -354,16 +364,16 @@ module Vagrant
     # @return [String]
     def dir_name(name)
       name = name.dup
-      name.gsub!(":", "-VAGRANTCOLON-") if Util::Platform.windows?
-      name.gsub!("/", "-VAGRANTSLASH-")
+      name.gsub!(":", VAGRANT_COLON) if Util::Platform.windows?
+      name.gsub!("/", VAGRANT_SLASH)
       name
     end
 
     # Returns the directory name for the box cleaned up
     def undir_name(name)
       name = name.dup
-      name.gsub!("-VAGRANTCOLON-", ":")
-      name.gsub!("-VAGRANTSLASH-", "/")
+      name.gsub!(VAGRANT_COLON, ":")
+      name.gsub!(VAGRANT_SLASH, "/")
       name
     end
 
@@ -438,7 +448,12 @@ module Vagrant
 
       yield dir
     ensure
-      dir.rmtree if dir.exist?
+      FileUtils.rm_rf(dir.to_s)
+    end
+
+    # Checks if a box with a given name exists.
+    def exists?(box_name)
+      all.any? { |box| box.first.eql?(box_name) }
     end
   end
 end

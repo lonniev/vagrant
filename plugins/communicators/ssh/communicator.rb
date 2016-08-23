@@ -19,8 +19,12 @@ module VagrantPlugins
   module CommunicatorSSH
     # This class provides communication with the VM via SSH.
     class Communicator < Vagrant.plugin("2", :communicator)
+      # Marker for start of PTY enabled command output
       PTY_DELIM_START = "bccbb768c119429488cfd109aacea6b5-pty"
+      # Marker for end of PTY enabled command output
       PTY_DELIM_END = "bccbb768c119429488cfd109aacea6b5-pty"
+      # Marker for start of regular command output
+      CMD_GARBAGE_MARKER = "41e57d38-b4f7-4e46-9c38-13873d338b86-vagrant-ssh"
 
       include Vagrant::Util::ANSIEscapeCodeRemover
       include Vagrant::Util::Retryable
@@ -333,9 +337,9 @@ module VagrantPlugins
           auth_methods:          auth_methods,
           config:                false,
           forward_agent:         ssh_info[:forward_agent],
-          keys:                  ssh_info[:private_key_path],
-          keys_only:             true,
-          paranoid:              false,
+          send_env:              ssh_info[:forward_env],
+          keys_only:             ssh_info[:keys_only],
+          paranoid:              ssh_info[:paranoid],
           password:              ssh_info[:password],
           port:                  ssh_info[:port],
           timeout:               15,
@@ -374,6 +378,10 @@ module VagrantPlugins
                 connect_opts = common_connect_opts.dup
                 connect_opts[:logger] = ssh_logger
 
+                if ssh_info[:private_key_path]
+                  connect_opts[:keys] = ssh_info[:private_key_path]
+                end
+
                 if ssh_info[:proxy_command]
                   connect_opts[:proxy] = Net::SSH::Proxy::Command.new(ssh_info[:proxy_command])
                 end
@@ -384,6 +392,7 @@ module VagrantPlugins
                 @logger.info("  - Username: #{ssh_info[:username]}")
                 @logger.info("  - Password? #{!!ssh_info[:password]}")
                 @logger.info("  - Key Path: #{ssh_info[:private_key_path]}")
+                @logger.debug("  - connect_opts: #{connect_opts}")
 
                 Net::SSH.start(ssh_info[:host], ssh_info[:username], connect_opts)
               ensure
@@ -420,7 +429,7 @@ module VagrantPlugins
         rescue Errno::EHOSTDOWN
           # This is raised if we get an ICMP DestinationUnknown error.
           raise Vagrant::Errors::SSHHostDown
-        rescue Errno::EHOSTUNREACH
+        rescue Errno::EHOSTUNREACH, Errno::ENETUNREACH
           # This is raised if we can't work out how to route traffic.
           raise Vagrant::Errors::SSHNoRoute
         rescue Net::SSH::Exception => e
@@ -485,16 +494,32 @@ module VagrantPlugins
             end
           end
 
+          marker_found = false
+          data_buffer = ''
+
           ch.exec(shell_cmd(opts)) do |ch2, _|
             # Setup the channel callbacks so we can get data and exit status
             ch2.on_data do |ch3, data|
               # Filter out the clear screen command
               data = remove_ansi_escape_codes(data)
-              @logger.debug("stdout: #{data}")
+
               if pty
                 pty_stdout << data
               else
-                yield :stdout, data if block_given?
+                if !marker_found
+                  data_buffer << data
+                  marker_index = data_buffer.index(CMD_GARBAGE_MARKER)
+                  if marker_index
+                    marker_found = true
+                    data_buffer.slice!(0, marker_index + CMD_GARBAGE_MARKER.size)
+                    data.replace data_buffer
+                    data_buffer = nil
+                  end
+                end
+
+                if block_given? && marker_found
+                  yield :stdout, data
+                end
               end
             end
 
@@ -511,7 +536,7 @@ module VagrantPlugins
 
               # Close the channel, since after the exit status we're
               # probably done. This fixes up issues with hanging.
-              channel.close
+              ch.close
             end
 
             # Set the terminal
@@ -558,7 +583,7 @@ module VagrantPlugins
               data = data.force_encoding('ASCII-8BIT')
               ch2.send_data data
             else
-              ch2.send_data "#{command}\n".force_encoding('ASCII-8BIT')
+              ch2.send_data "printf '#{CMD_GARBAGE_MARKER}'\n#{command}\n".force_encoding('ASCII-8BIT')
               # Remember to exit or this channel will hang open
               ch2.send_data "exit\n"
             end
@@ -611,6 +636,7 @@ module VagrantPlugins
           end
 
           data = pty_stdout[/.*#{PTY_DELIM_START}(.*?)#{PTY_DELIM_END}/m, 1]
+          data ||= ""
           @logger.debug("PTY stdout parsed: #{data}")
           yield :stdout, data if block_given?
         end

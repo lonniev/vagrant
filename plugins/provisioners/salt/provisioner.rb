@@ -35,8 +35,8 @@ module VagrantPlugins
         desired_binaries = []
         if !@config.no_minion
           if @machine.config.vm.communicator == :winrm
-            desired_binaries.push('C:\\salt\\salt-minion.exe')
-            desired_binaries.push('C:\\salt\\salt-call.exe')
+            desired_binaries.push('C:\\salt\\salt-minion.bat')
+            desired_binaries.push('C:\\salt\\salt-call.bat')
           else
             desired_binaries.push('salt-minion')
             desired_binaries.push('salt-call')
@@ -141,13 +141,6 @@ module VagrantPlugins
 
         if @config.install_args
           options = "%s %s" % [options, @config.install_args]
-        end
-
-        if @config.install_command
-          # If this is defined, we will ignore both install_type and
-          # install_args and use this instead. Every necessary command option
-          # will need to be specified by the user.
-          options = @config.install_command
         end
 
         if @config.verbose
@@ -327,49 +320,38 @@ module VagrantPlugins
         end
       end
 
-      def call_masterless
-        @machine.env.ui.info "Calling state.highstate in local mode... (this may take a while)"
-        cmd = "salt-call state.highstate --local"
-        if @config.minion_id
-          cmd += " --id #{@config.minion_id}"
-        end
-        cmd += " -l debug#{get_pillar}"
-        @machine.communicate.sudo(cmd) do |type, data|
-          if @config.verbose
-            @machine.env.ui.info(data)
-          end
-        end
-      end
-
       def call_highstate
-        if @config.minion_config
-          @machine.env.ui.info "Copying salt minion config to #{@config.config_dir}"
-          @machine.communicate.upload(expanded_path(@config.minion_config).to_s, @config.config_dir + "/minion")
-        end
-
-        if @config.masterless
-          call_masterless
-        elsif @config.run_highstate
+        if @config.run_highstate
+          local=""
+          if @config.masterless
+            local=" --local"
+          end
           @machine.env.ui.info "Calling state.highstate... (this may take a while)"
           if @config.install_master
-            @machine.communicate.sudo("salt '*' saltutil.sync_all")
-            @machine.communicate.sudo("salt '*' state.highstate --verbose#{get_loglevel}#{get_colorize}#{get_pillar}") do |type, data|
-              if @config.verbose
-                @machine.env.ui.info(data.rstrip)
-              end
+            unless @config.masterless?
+              @machine.communicate.sudo("salt '*' saltutil.sync_all")
             end
+            @machine.communicate.sudo("salt '*' state.highstate --verbose #{local}#{get_loglevel}#{get_colorize}#{get_pillar}") do |type, data|
+            if @config.verbose
+                @machine.env.ui.info(data.rstrip)
+            end
+          end
           else
             if @machine.config.vm.communicator == :winrm
               opts = { elevated: true }
-              @machine.communicate.execute("C:\\salt\\salt-call.exe saltutil.sync_all", opts)
-              @machine.communicate.execute("C:\\salt\\salt-call.exe state.highstate --retcode-passthrough #{get_loglevel}#{get_colorize}#{get_pillar}", opts) do |type, data|
+              unless @config.masterless?
+                @machine.communicate.execute("C:\\salt\\salt-call.bat saltutil.sync_all", opts)
+              end
+              @machine.communicate.execute("C:\\salt\\salt-call.bat state.highstate --retcode-passthrough #{local}#{get_loglevel}#{get_colorize}#{get_pillar}", opts) do |type, data|
                 if @config.verbose
                   @machine.env.ui.info(data.rstrip)
                 end
               end
             else
-              @machine.communicate.sudo("salt-call saltutil.sync_all")
-              @machine.communicate.sudo("salt-call state.highstate --retcode-passthrough #{get_loglevel}#{get_colorize}#{get_pillar}") do |type, data|
+              unless @config.masterless?
+                @machine.communicate.sudo("salt-call saltutil.sync_all")
+              end
+              @machine.communicate.sudo("salt-call state.highstate --retcode-passthrough #{local}#{get_loglevel}#{get_colorize}#{get_pillar}") do |type, data|
                 if @config.verbose
                   @machine.env.ui.info(data.rstrip)
                 end

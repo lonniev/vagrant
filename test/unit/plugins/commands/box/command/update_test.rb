@@ -19,6 +19,11 @@ describe VagrantPlugins::CommandBox::Command::Update do
   let(:action_runner) { double("action_runner") }
   let(:machine) { iso_env.machine(iso_env.machine_names[0], :dummy) }
 
+  let(:download_options) { ["--insecure",
+                            "--cacert", "foo",
+                            "--capath", "bar",
+                            "--cert", "baz"] }
+
   subject { described_class.new(argv, iso_env) }
 
   before do
@@ -30,7 +35,9 @@ describe VagrantPlugins::CommandBox::Command::Update do
     context "updating specific box" do
       let(:argv) { ["--box", "foo"] }
 
-      let(:metadata_url) { Pathname.new(Dir.mktmpdir).join("metadata.json") }
+      let(:scratch) { Dir.mktmpdir("vagrant-test-command-box-update-execute") }
+
+      let(:metadata_url) { Pathname.new(scratch).join("metadata.json") }
 
       before do
         metadata_url.open("w") do |f|
@@ -39,6 +46,10 @@ describe VagrantPlugins::CommandBox::Command::Update do
 
         test_iso_env.box3(
           "foo", "1.0", :virtualbox, metadata_url: metadata_url.to_s)
+      end
+
+      after do
+        FileUtils.rm_rf(scratch)
       end
 
       it "doesn't update if they're up to date" do
@@ -86,6 +97,10 @@ describe VagrantPlugins::CommandBox::Command::Update do
             expect(opts[:box_url]).to eq(metadata_url.to_s)
             expect(opts[:box_provider]).to eq("virtualbox")
             expect(opts[:box_version]).to eq("1.1")
+            expect(opts[:box_download_ca_path]).to be_nil
+            expect(opts[:box_download_ca_cert]).to be_nil
+            expect(opts[:box_client_cert]).to be_nil
+            expect(opts[:box_download_insecure]).to be_nil
           end
 
           opts
@@ -158,6 +173,50 @@ describe VagrantPlugins::CommandBox::Command::Update do
         end
       end
 
+      context "download options are specified" do
+        let(:argv) { ["--box", "foo" ].concat(download_options) }
+
+        it "passes down download options" do
+          metadata_url.open("w") do |f|
+            f.write(<<-RAW)
+        {
+          "name": "foo",
+          "versions": [
+            {
+              "version": "1.0"
+            },
+            {
+              "version": "1.1",
+              "providers": [
+                {
+                  "name": "virtualbox",
+                  "url": "bar"
+                }
+              ]
+            }
+          ]
+        }
+            RAW
+          end
+
+          action_called = false
+          allow(action_runner).to receive(:run) do |action, opts|
+            if opts[:box_provider]
+              action_called = true
+              expect(opts[:box_download_ca_cert]).to eq("foo")
+              expect(opts[:box_download_ca_path]).to eq("bar")
+              expect(opts[:box_client_cert]).to eq("baz")
+              expect(opts[:box_download_insecure]).to be_true
+            end
+
+            opts
+          end
+
+          subject.execute
+          expect(action_called).to be_true
+        end
+      end
+
       context "with a box that doesn't exist" do
         let(:argv) { ["--box", "nope"] }
 
@@ -192,7 +251,10 @@ describe VagrantPlugins::CommandBox::Command::Update do
       it "doesn't update boxes if they're up-to-date" do
         machine.stub(box: box)
         expect(box).to receive(:has_update?).
-          with(machine.config.vm.box_version).
+          with(machine.config.vm.box_version,
+               {download_options:
+                 {ca_cert: nil, ca_path: nil, client_cert: nil,
+                  insecure: false}}).
           and_return(nil)
 
         expect(action_runner).to receive(:run).never
@@ -200,41 +262,101 @@ describe VagrantPlugins::CommandBox::Command::Update do
         subject.execute
       end
 
-      it "updates boxes if they have an update" do
-        md = Vagrant::BoxMetadata.new(StringIO.new(<<-RAW))
-      {
-        "name": "foo",
-        "versions": [
-          {
-            "version": "1.0"
-          },
-          {
-            "version": "1.1",
-            "providers": [
-              {
-                "name": "virtualbox",
-                "url": "bar"
-              }
-            ]
-          }
-        ]
-      }
-        RAW
-
-        machine.stub(box: box)
-        expect(box).to receive(:has_update?).
-          with(machine.config.vm.box_version).
-          and_return([md, md.version("1.1"), md.version("1.1").provider("virtualbox")])
-
-        expect(action_runner).to receive(:run).with { |action, opts|
-          expect(opts[:box_url]).to eq(box.metadata_url)
-          expect(opts[:box_provider]).to eq("virtualbox")
-          expect(opts[:box_version]).to eq("1.1")
-          expect(opts[:ui]).to equal(machine.ui)
-          true
+      context "boxes have an update" do
+        let(:md) {
+          md = Vagrant::BoxMetadata.new(StringIO.new(<<-RAW))
+        {
+          "name": "foo",
+          "versions": [
+            {
+              "version": "1.0"
+            },
+            {
+              "version": "1.1",
+              "providers": [
+                {
+                  "name": "virtualbox",
+                  "url": "bar"
+                }
+              ]
+            }
+          ]
+        }
+          RAW
         }
 
-        subject.execute
+        before { machine.stub(box: box) }
+
+        it "updates boxes" do
+          expect(box).to receive(:has_update?).
+            with(machine.config.vm.box_version,
+                 {download_options:
+                   {ca_cert: nil, ca_path: nil, client_cert: nil,
+                    insecure: false}}).
+            and_return([md, md.version("1.1"), md.version("1.1").provider("virtualbox")])
+
+          expect(action_runner).to receive(:run).with { |action, opts|
+            expect(opts[:box_url]).to eq(box.metadata_url)
+            expect(opts[:box_provider]).to eq("virtualbox")
+            expect(opts[:box_version]).to eq("1.1")
+            expect(opts[:ui]).to equal(machine.ui)
+            true
+          }
+
+          subject.execute
+        end
+
+        context "machine has download options" do
+          before do
+            machine.config.vm.box_download_ca_cert = "oof"
+            machine.config.vm.box_download_ca_path = "rab"
+            machine.config.vm.box_download_client_cert = "zab"
+            machine.config.vm.box_download_insecure = false
+          end
+
+          it "uses download options from machine" do
+            expect(box).to receive(:has_update?).
+              with(machine.config.vm.box_version,
+                   {download_options:
+                     {ca_cert: "oof", ca_path: "rab", client_cert: "zab",
+                      insecure: false}}).
+              and_return([md, md.version("1.1"), md.version("1.1").provider("virtualbox")])
+
+            expect(action_runner).to receive(:run).with { |action, opts|
+              expect(opts[:box_download_ca_cert]).to eq("oof")
+              expect(opts[:box_download_ca_path]).to eq("rab")
+              expect(opts[:box_client_cert]).to eq("zab")
+              expect(opts[:box_download_insecure]).to be_false
+              true
+            }
+
+            subject.execute
+          end
+
+          context "download options are specified on the command line" do
+            let(:argv) { download_options }
+
+            it "overrides download options from machine with options from CLI" do
+              expect(box).to receive(:has_update?).
+                with(machine.config.vm.box_version,
+                     {download_options:
+                       {ca_cert: "foo", ca_path: "bar", client_cert: "baz",
+                        insecure: true}}).
+                and_return([md, md.version("1.1"),
+                            md.version("1.1").provider("virtualbox")])
+
+              expect(action_runner).to receive(:run).with { |action, opts|
+                expect(opts[:box_download_ca_cert]).to eq("foo")
+                expect(opts[:box_download_ca_path]).to eq("bar")
+                expect(opts[:box_client_cert]).to eq("baz")
+                expect(opts[:box_download_insecure]).to be_true
+                true
+              }
+
+              subject.execute
+            end
+          end
+        end
       end
     end
   end

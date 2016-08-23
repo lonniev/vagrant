@@ -13,9 +13,9 @@ describe Vagrant::Action::Builtin::MixinSyncedFolders do
     end
   end
 
-  let(:machine) do
-    data_dir = Pathname.new(Dir.mktmpdir)
+  let(:data_dir) { Pathname.new(Dir.mktmpdir("vagrant-test-mixin-synced-folders")) }
 
+  let(:machine) do
     double("machine").tap do |machine|
       allow(machine).to receive(:config).and_return(machine_config)
       allow(machine).to receive(:data_dir).and_return(data_dir)
@@ -29,6 +29,10 @@ describe Vagrant::Action::Builtin::MixinSyncedFolders do
   end
 
   let(:vm_config) { double("machine_vm_config", :allowed_synced_folder_types => nil) }
+
+  after do
+    FileUtils.rm_rf(data_dir)
+  end
 
   describe "default_synced_folder_type" do
     it "returns the usable implementation" do
@@ -114,11 +118,13 @@ describe Vagrant::Action::Builtin::MixinSyncedFolders do
       result = subject.synced_folders(machine)
       expect(result.length).to eq(2)
       expect(result[:default]).to eq({
-        "another" => folders["another"],
-        "foo" => folders["foo"],
-        "root" => folders["root"],
+        "another" => folders["another"].merge(__vagrantfile: true),
+        "foo" => folders["foo"].merge(__vagrantfile: true),
+        "root" => folders["root"].merge(__vagrantfile: true),
       })
-      expect(result[:nfs]).to eq({ "nfs" => folders["nfs"] })
+      expect(result[:nfs]).to eq({
+        "nfs" => folders["nfs"].merge(__vagrantfile: true),
+      })
     end
 
     it "should return the proper set of folders of a custom config" do
@@ -185,16 +191,20 @@ describe Vagrant::Action::Builtin::MixinSyncedFolders do
       result = subject.synced_folders(machine, cached: true)
       expect(result.length).to eq(2)
       expect(result[:default]).to eq({
-        "another" => old_folders["another"],
-        "foo" => old_folders["foo"],
-        "root" => old_folders["root"],
+        "another" => old_folders["another"].merge(__vagrantfile: true),
+        "foo" => old_folders["foo"].merge(__vagrantfile: true),
+        "root" => old_folders["root"].merge(__vagrantfile: true),
       })
-      expect(result[:nfs]).to eq({ "nfs" => old_folders["nfs"] })
+      expect(result[:nfs]).to eq({ "nfs" => old_folders["nfs"].merge(__vagrantfile: true) })
     end
 
     it "should be able to save and retrieve cached versions" do
-      folders["foo"] = { type: "default" }
-      result = subject.synced_folders(machine)
+      other_folders = {}
+      other = double("config")
+      other.stub(synced_folders: other_folders)
+
+      other_folders["foo"] = { type: "default" }
+      result = subject.synced_folders(machine, config: other)
       subject.save_synced_folders(machine, result)
 
       # Clear the folders and set some more
@@ -212,10 +222,36 @@ describe Vagrant::Action::Builtin::MixinSyncedFolders do
       expect(result.length).to eq(2)
       expect(result[:default]).to eq({
         "foo" => { type: "default" },
-        "bar" => { type: "default" },
+        "bar" => { type: "default", __vagrantfile: true},
       })
       expect(result[:nfs]).to eq({
-        "baz" => { type: "nfs" }
+        "baz" => { type: "nfs", __vagrantfile: true }
+      })
+    end
+
+    it "should remove items from the vagrantfile that were removed" do
+      folders["foo"] = { type: "default" }
+      result = subject.synced_folders(machine)
+      subject.save_synced_folders(machine, result)
+
+      # Clear the folders and set some more
+      folders.clear
+      folders["bar"] = { type: "default" }
+      folders["baz"] = { type: "nfs" }
+      result = subject.synced_folders(machine)
+      subject.save_synced_folders(machine, result, merge: true, vagrantfile: true)
+
+      # Clear one last time
+      folders.clear
+
+      # Read them all back
+      result = subject.synced_folders(machine, cached: true)
+      expect(result.length).to eq(2)
+      expect(result[:default]).to eq({
+        "bar" => { type: "default", __vagrantfile: true},
+      })
+      expect(result[:nfs]).to eq({
+        "baz" => { type: "nfs", __vagrantfile: true }
       })
     end
   end

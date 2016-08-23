@@ -8,12 +8,12 @@ module VagrantPlugins
       name "Windows guest."
       description "Windows guest support."
 
-      config("windows") do
+      config(:windows) do
         require_relative "config"
         Config
       end
 
-      guest("windows")  do
+      guest(:windows)  do
         require_relative "guest"
         init!
         Guest
@@ -62,6 +62,11 @@ module VagrantPlugins
       guest_capability(:windows, :mount_smb_shared_folder) do
         require_relative "cap/mount_shared_folder"
         Cap::MountSharedFolder
+      end
+
+      guest_capability(:windows, :rsync_scrub_guestpath) do
+        require_relative "cap/rsync"
+        Cap::RSync
       end
 
       guest_capability(:windows, :rsync_pre) do

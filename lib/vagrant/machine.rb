@@ -109,6 +109,7 @@ module Vagrant
       @provider_options = provider_options
       @ui              = Vagrant::UI::Prefixed.new(@env.ui, @name)
       @ui_mutex        = Mutex.new
+      @state_mutex     = Mutex.new
 
       # Read the ID, which is usually in local storage
       @id = nil
@@ -116,6 +117,9 @@ module Vagrant
       # XXX: This is temporary. This will be removed very soon.
       if base
         @id = name
+
+        # For base setups, we don't want to insert the key
+        @config.ssh.insert_key = false
       else
         reload
       end
@@ -141,6 +145,10 @@ module Vagrant
       if state.id == MachineState::NOT_CREATED_ID
         self.id = nil
       end
+
+      # Output a bunch of information about this machine in
+      # machine-readable format in case someone is listening.
+      @ui.machine("metadata", "provider", provider_name)
     end
 
     # This calls an action on the provider. The provider may or may not
@@ -188,7 +196,10 @@ module Vagrant
         end
 
         # Call the action
-        action_raw(name, callable, extra_env)
+        ui.machine("action", name.to_s, "start")
+        action_result = action_raw(name, callable, extra_env)
+        ui.machine("action", name.to_s, "end")
+        action_result
       end
     rescue Errors::EnvironmentLockedError
       raise Errors::MachineActionLockedError,
@@ -424,18 +435,23 @@ module Vagrant
       info[:host] ||= @config.ssh.default.host
       info[:port] ||= @config.ssh.default.port
       info[:private_key_path] ||= @config.ssh.default.private_key_path
+      info[:keys_only] ||= @config.ssh.default.keys_only
+      info[:paranoid] ||= @config.ssh.default.paranoid
       info[:username] ||= @config.ssh.default.username
 
       # We set overrides if they are set. These take precedence over
       # provider-returned data.
       info[:host] = @config.ssh.host if @config.ssh.host
       info[:port] = @config.ssh.port if @config.ssh.port
+      info[:keys_only] = @config.ssh.keys_only
+      info[:paranoid] = @config.ssh.paranoid
       info[:username] = @config.ssh.username if @config.ssh.username
       info[:password] = @config.ssh.password if @config.ssh.password
 
       # We also set some fields that are purely controlled by Varant
       info[:forward_agent] = @config.ssh.forward_agent
       info[:forward_x11]   = @config.ssh.forward_x11
+      info[:forward_env]   = @config.ssh.forward_env
 
       info[:ssh_command] = @config.ssh.ssh_command if @config.ssh.ssh_command
 
@@ -448,7 +464,7 @@ module Vagrant
       if !info[:private_key_path] && !info[:password]
         if @config.ssh.private_key_path
           info[:private_key_path] = @config.ssh.private_key_path
-        else
+        elsif info[:keys_only]
           info[:private_key_path] = @env.default_private_key_path
         end
       end
@@ -494,11 +510,17 @@ module Vagrant
       # master index.
       uuid = index_uuid
       if uuid
-        entry = @env.machine_index.get(uuid)
-        if entry
-          entry.state = result.short_description
-          @env.machine_index.set(entry)
-          @env.machine_index.release(entry)
+        # active_machines provides access to query this info on each machine
+        # from a different thread, ensure multiple machines do not access
+        # the locked entry simultaneously as this triggers a locked machine
+        # exception.
+        @state_mutex.synchronize do
+          entry = @env.machine_index.get(uuid)
+          if entry
+            entry.state = result.short_description
+            @env.machine_index.set(entry)
+            @env.machine_index.release(entry)
+          end
         end
       end
 

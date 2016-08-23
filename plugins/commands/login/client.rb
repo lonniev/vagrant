@@ -1,8 +1,12 @@
 require "rest_client"
+require "vagrant/util/downloader"
+require "vagrant/util/presence"
 
 module VagrantPlugins
   module LoginCommand
     class Client
+      include Vagrant::Util::Presence
+
       # Initializes a login client with the given Vagrant::Environment.
       #
       # @param [Vagrant::Environment] env
@@ -45,8 +49,24 @@ module VagrantPlugins
         with_error_handling do
           url      = "#{Vagrant.server_url}/api/v1/authenticate"
           request  = { "user" => { "login" => user, "password" => pass } }
-          response = RestClient.post(
-            url, JSON.dump(request), content_type: :json)
+
+          proxy   = nil
+          proxy ||= ENV["HTTPS_PROXY"] || ENV["https_proxy"]
+          proxy ||= ENV["HTTP_PROXY"]  || ENV["http_proxy"]
+          RestClient.proxy = proxy
+
+          response = RestClient::Request.execute(
+            method: :post,
+            url: url,
+            payload: JSON.dump(request),
+            proxy: proxy,
+            headers: {
+              accept: :json,
+              content_type: :json,
+              user_agent: Vagrant::Util::Downloader::USER_AGENT,
+            },
+          )
+
           data = JSON.load(response.to_s)
           data["token"]
         end
@@ -71,7 +91,21 @@ module VagrantPlugins
       #
       # @return [String]
       def token
-        if ENV["ATLAS_TOKEN"] && !ENV["ATLAS_TOKEN"].empty?
+        if present?(ENV["ATLAS_TOKEN"]) && token_path.exist?
+          @env.ui.warn <<-EOH.strip
+Vagrant detected both the ATLAS_TOKEN environment variable and a Vagrant login
+token are present on this system. The ATLAS_TOKEN environment variable takes
+precedence over the locally stored token. To remove this error, either unset
+the ATLAS_TOKEN environment variable or remove the login token stored on disk:
+
+    ~/.vagrant.d/data/vagrant_login_token
+
+In general, the ATLAS_TOKEN is more preferred because it is respected by all
+HashiCorp products.
+EOH
+        end
+
+        if present?(ENV["ATLAS_TOKEN"])
           @logger.debug("Using authentication token from environment variable")
           return ENV["ATLAS_TOKEN"]
         end

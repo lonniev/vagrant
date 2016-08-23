@@ -4,18 +4,20 @@ require "tempfile"
 require "tmpdir"
 require "webrick"
 
+require "fake_ftp"
+
 require File.expand_path("../../../../base", __FILE__)
 
 require "vagrant/util/file_checksum"
 
-describe Vagrant::Action::Builtin::BoxAdd do
+describe Vagrant::Action::Builtin::BoxAdd, :skip_windows do
   include_context "unit"
 
   let(:app) { lambda { |env| } }
   let(:env) { {
     box_collection: box_collection,
     hook: Proc.new { |name, env| env },
-    tmp_path: Pathname.new(Dir.mktmpdir),
+    tmp_path: Pathname.new(Dir.mktmpdir("vagrant-test-builtin-box-add")),
     ui: Vagrant::UI::Silent.new,
   } }
 
@@ -29,13 +31,33 @@ describe Vagrant::Action::Builtin::BoxAdd do
     Vagrant::Box.new("foo", :virtualbox, "1.0", box_dir)
   end
 
+  after do
+    FileUtils.rm_rf(env[:tmp_path])
+  end
+
   # Helper to quickly SHA1 checksum a path
   def checksum(path)
     FileChecksum.new(path, Digest::SHA1).checksum
   end
 
+  def with_ftp_server(path, **opts)
+    path = Pathname.new(path)
+
+    port = nil
+    server = nil
+    with_random_port do |port1, port2|
+      port = port1
+      server = FakeFtp::Server.new(port1, port2)
+    end
+    server.add_file(path.basename, path.read)
+    server.start
+    yield port
+  ensure
+    server.stop rescue nil
+  end
+
   def with_web_server(path, **opts)
-    tf = Tempfile.new("vagrant")
+    tf = Tempfile.new("vagrant-web-server")
     tf.close
 
     opts[:json_type] ||= "application/json"
@@ -53,6 +75,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
     thr = Thread.new { server.start }
     yield port
   ensure
+    tf.unlink
     server.shutdown rescue nil
     thr.join rescue nil
   end
@@ -123,6 +146,26 @@ describe Vagrant::Action::Builtin::BoxAdd do
       end
     end
 
+    it "adds from FTP URL" do
+      box_path = iso_env.box2_file(:virtualbox)
+      with_ftp_server(box_path) do |port|
+        env[:box_name] = "foo"
+        env[:box_url] = "ftp://127.0.0.1:#{port}/#{box_path.basename}"
+
+        expect(box_collection).to receive(:add).with { |path, name, version, **opts|
+          expect(checksum(path)).to eq(checksum(box_path))
+          expect(name).to eq("foo")
+          expect(version).to eq("0")
+          expect(opts[:metadata_url]).to be_nil
+          true
+        }.and_return(box)
+
+        expect(app).to receive(:call).with(env)
+
+        subject.call(env)
+      end
+    end
+
     it "raises an error if no name is given" do
       box_path = iso_env.box2_file(:virtualbox)
 
@@ -164,6 +207,28 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
       expect { subject.call(env) }.
         to raise_error(Vagrant::Errors::BoxChecksumMismatch)
+    end
+
+    it "does not raise an error if the checksum has different case" do
+      box_path = iso_env.box2_file(:virtualbox)
+
+      box = double(
+        name: "foo",
+        version: "1.2.3",
+        provider: "virtualbox",
+      )
+
+      env[:box_name] = box.name
+      env[:box_url] = box_path.to_s
+      env[:box_checksum] = checksum(box_path)
+      env[:box_checksum_type] = "sha1"
+
+      # Convert to a different case
+      env[:box_checksum].upcase!
+
+      expect(box_collection).to receive(:add).and_return(box)
+
+      expect { subject.call(env) }.to_not raise_error
     end
 
     it "raises an error if the box path doesn't exist" do
@@ -219,7 +284,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
   context "with box metadata" do
     it "adds from HTTP URL" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new(["vagrant", ".json"]).tap do |f|
+      tf = Tempfile.new(["vagrant-test-box-http-url", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -262,7 +327,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "adds from HTTP URL with complex JSON mime type" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new(["vagrant", ".json"]).tap do |f|
+      tf = Tempfile.new(["vagrant-test-http-json", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -307,7 +372,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "adds from shorthand path" do
       box_path = iso_env.box2_file(:virtualbox)
-      td = Pathname.new(Dir.mktmpdir)
+      td = Pathname.new(Dir.mktmpdir("vagrant-test-box-add-shorthand-path"))
       tf = td.join("mitchellh", "precise64.json")
       tf.dirname.mkpath
       tf.open("w") do |f|
@@ -351,11 +416,13 @@ describe Vagrant::Action::Builtin::BoxAdd do
           subject.call(env)
         end
       end
+
+      FileUtils.rm_rf(td)
     end
 
     it "add from shorthand path with configured server url" do
       box_path = iso_env.box2_file(:virtualbox)
-      td = Pathname.new(Dir.mktmpdir)
+      td = Pathname.new(Dir.mktmpdir("vagrant-test-box-add-server-url"))
       tf = td.join("mitchellh", "precise64.json")
       tf.dirname.mkpath
       tf.open("w") do |f|
@@ -398,11 +465,13 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
         subject.call(env)
       end
+
+      FileUtils.rm_rf(td)
     end
 
     it "authenticates HTTP URLs and adds them" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new(["vagrant", ".json"]).tap do |f|
+      tf = Tempfile.new(["vagrant-test-http", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -460,7 +529,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "adds from HTTP URL with a checksum" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new(["vagrant", ".json"]).tap do |f|
+      tf = Tempfile.new(["vagrant-test-http-checksum", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -505,7 +574,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "raises an exception if checksum given but not correct" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new(["vagrant", ".json"]).tap do |f|
+      tf = Tempfile.new(["vagrant-test-bad-checksum", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -543,9 +612,6 @@ describe Vagrant::Action::Builtin::BoxAdd do
     end
 
     it "raises an error if no Vagrant server is set" do
-      tf = Tempfile.new("foo")
-      tf.close
-
       env[:box_url] = "mitchellh/precise64.json"
 
       expect(box_collection).to receive(:add).never
@@ -558,10 +624,9 @@ describe Vagrant::Action::Builtin::BoxAdd do
     end
 
     it "raises an error if shorthand is invalid" do
-      tf = Tempfile.new("foo")
-      tf.close
+      path = Dir::Tmpname.create("vagrant-shorthand-invalid") {}
 
-      with_web_server(Pathname.new(tf.path)) do |port|
+      with_web_server(Pathname.new(path)) do |port|
         env[:box_url] = "mitchellh/precise64.json"
 
         expect(box_collection).to receive(:add).never
@@ -577,7 +642,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "raises an error if multiple metadata URLs are given" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-multi-metadata", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -613,7 +678,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "adds the latest version of a box with only one provider" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-latest-version", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -652,7 +717,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "adds the latest version of a box with the specified provider" do
       box_path = iso_env.box2_file(:vmware)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-specific-provider", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -698,7 +763,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "adds the latest version of a box with the specified provider, even if not latest" do
       box_path = iso_env.box2_file(:vmware)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-specified-provider", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -747,7 +812,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "adds the constrained version of a box with the only provider" do
       box_path = iso_env.box2_file(:vmware)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-constrained", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -787,7 +852,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "adds the constrained version of a box with the specified provider" do
       box_path = iso_env.box2_file(:vmware)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-constrained-provider", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -832,7 +897,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "adds the latest version of a box with any specified provider" do
       box_path = iso_env.box2_file(:vmware)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-latest-version", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -880,7 +945,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "asks the user what provider if multiple options" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-provider-asks", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -926,7 +991,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "raises an exception if the name doesn't match a requested name" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-name-mismatch", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -961,7 +1026,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "raises an exception if no matching version" do
       box_path = iso_env.box2_file(:vmware)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-no-matching-version", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -992,7 +1057,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
     end
 
     it "raises an error if there is no matching provider" do
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-no-matching-provider", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -1026,7 +1091,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "raises an error if a box already exists" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-already-exists", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",
@@ -1061,7 +1126,7 @@ describe Vagrant::Action::Builtin::BoxAdd do
 
     it "force adds a box if specified" do
       box_path = iso_env.box2_file(:virtualbox)
-      tf = Tempfile.new("vagrant").tap do |f|
+      tf = Tempfile.new(["vagrant-box-force-add", ".json"]).tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo/bar",

@@ -41,10 +41,14 @@ describe Vagrant::Action::Builtin::SyncedFolders do
       plugins[:default] = [impl(true, "default"), 10]
       plugins[:nfs] = [impl(true, "nfs"), 5]
 
-      env[:root_path] = Pathname.new(Dir.mktmpdir)
+      env[:root_path] = Pathname.new(Dir.mktmpdir("vagrant-test-synced-folders-call"))
       subject.stub(plugins: plugins)
       subject.stub(synced_folders: synced_folders)
       allow(subject).to receive(:save_synced_folders)
+    end
+
+    after do
+      FileUtils.rm_rf(env[:root_path])
     end
 
     it "should create on the host if specified" do
@@ -196,6 +200,33 @@ describe Vagrant::Action::Builtin::SyncedFolders do
       expect(order).to eq([:prepare, :enable])
       expect(ids.length).to eq(2)
       expect(ids[0]).to eq(ids[1])
+    end
+
+    context "with folders from the machine" do
+      it "removes outdated folders not present in config" do
+        expect(subject).to receive(:save_synced_folders).with(
+          machine, anything, merge: true, vagrantfile: true)
+
+        subject.call(env)
+      end
+    end
+
+    context "with custom folders" do
+      before do
+        new_config = double("config")
+        env[:synced_folders_config] = new_config
+
+        allow(subject).to receive(:synced_folders).
+          with(machine, config: new_config, cached: false).
+          and_return({})
+      end
+
+      it "doesn't remove outdated folders not present in config" do
+        expect(subject).to receive(:save_synced_folders).with(
+          machine, anything, merge: true)
+
+        subject.call(env)
+      end
     end
   end
 end

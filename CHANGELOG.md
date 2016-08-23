@@ -1,3 +1,427 @@
+## Next Version (Unreleased)
+
+FEATURES:
+
+IMPROVEMENTS:
+
+  - Add detection for DragonFly BSD [GH-7701]
+  - Implement auto_start and auto_stop actions for Hyper-V [GH-7647]
+  - communicators/ssh: Remove any content prepended to STDOUT [GH-7676, GH-7613]
+
+BUG FIXES:
+
+  - commands/package: Provide machine data directory for base box package
+      [GH-5070, GH-7725]
+  - core: Fix windows path formatting [GH-6598]
+  - core: Fixes for ssh-agent interactions [GH-7703, GH-7621, GH-7398]
+  - core: Support VAGRANT_DOTFILE_PATH relative to the Vagrantfile [GH-7623]
+  - guests: Prevent ssh disconnect errors on halt command [GH-7675]
+  - guests/bsd: Remove Darwin matching [GH-7701]
+  - guests/linux: Fix SSH key permissions [GH-7610, GH-7611]
+  - guests/linux: Always sort discovered network interfaces [GH-7705, GH-7668]
+  - guests/linux: Fixes for user and group ID lookups for virtualbox shared folders
+      [GH-7616, GH-7662, GH-7720]
+  - guests/openbsd: Add custom halt capability [GH-7701]
+  - guests/ubuntu: Fix detection on older guests [GH-7632, GH-7524, GH-7625]
+  - hosts/arch: Detect NFS server by service name on arch [GH-7630, GH-7629]
+  - hosts/darwin: Fix generated RDP configuration file [GH-7698]
+  - synced_folders/nfs: Display warning when configured for NFSv4 and UDP [GH-7740]
+  - synced_folders/rsync: Properly ignore excluded files within synced directory
+      from `chown` command. [GH-5256, GH-7726]
+
+## 1.8.5 (July 18, 2016)
+
+FEATURES:
+
+  - core: Provide a way to globally disable box update checks with the
+      environment variable `VAGRANT_BOX_UPDATE_CHECK_DISABLE`. Setting this
+      to any non-empty value will instruct Vagrant to not look for box updates
+      when running `vagrant up`. Setting this environment variable has no
+      effect on the `vagrant box` commands.
+
+IMPROVEMENTS:
+
+  - guests/arch: Support installing synced folder clients [GH-7519]
+  - guests/darwin: Allow ipv6 static networks [GH-7491]
+  - providers/virtualbox: Add support for 5.1 [GH-7574]
+
+BUG FIXES:
+
+  - core: Bump listen gem and Ruby version to improve rsync performance
+      [GH-7453, GH-7441]
+  - core: Check process stdout when detecting if a hyperv admin
+      [GH-7465, GH-7467]
+  - core: Ensure removal of temporary directory when box download fails
+      [GH-7496, GH-7499]
+  - core: Fix regression for installing plugins from path [GH-7505, GH-7493]
+  - core: Skip checking conflicts on disabled ports [GH-7587]
+  - core: Idempotent write-out for state file [GH-7550]
+  - core/guests: Create common BSD guest for shared logic
+  - core/guests: Ignore empty output from `/sbin/ip`
+      [GH-7539, GH-7537, GH-7533, GH-7605]
+  - synced_folders/nfs: Shellescape rsync paths
+      [GH-7540, GH-7605]
+  - synced_folders/nfs: Ensure retries take place [GH-6360, GH-7605]
+  - synced_folders/rsync: Shellescape rsync paths
+      [GH-7580, GH-6690, GH-7579, GH-7605]
+  - synced_folders/rsync: Translate Windows paths
+      [GH-7012, GH-6702, GH-6568, GH-7046]
+  - guests/bsd: Consolidate core logic for mounting NFS folders
+      [GH-7480, GH-7474, GH-7466]
+  - guests/bsd: Consolidate core logic for public key management [GH-7481]
+  - guests/bsd: Consolidate core logic for halting [GH-7484]
+  - guests/centos: Use `ip` instead of `ifconfig` to detect network interfaces
+      [GH-7460]
+  - guests/debian: Ensure newline when inserting public key [GH-7456]
+  - guests/linux: Ensure NFS retries during mounting [GH-7492]
+  - guests/redhat: Use `/sbin/ip` to list and configure networks for
+      compatability with older versions of CentOS [GH-7482]
+  - guests/redhat: Ensure newline when inserting public key [GH-7598, GH-7605]
+  - guests/ubuntu: Use /etc/os-release to detech [GH-7524]
+  - guests/ubuntu: Use short hostname [GH-7488, GH-7605]
+  - providers/hyperv: Fix version check and catch statement [GH-7447, GH-7487]
+
+## 1.8.4 (June 13, 2016)
+
+BUG FIXES:
+
+  - core: Fix bundler plugin issue and version constraint [GH-7418, GH-7415]
+  - providers/virtualbox: Use 8 network interfaces (due to Windows limitation)
+      [GH-7417, GH-7419]
+  - provisioners/ansible(both): Honor "galaxy_roles_path" option when running
+      ansible-playbook [GH-7269, GH-7420]
+  - provisioners/ansible_local: Add quotes around "ansible-galaxy" arguments
+      [GH-7420]
+
+IMPROVEMENTS:
+
+  - guests/redhat: Add CloudLinux detection [GH-7428, GH-7427]
+
+## 1.8.3 (June 10, 2016)
+
+BREAKING CHANGES:
+
+  - The `winrm` communicator now shares the same upload behavior as the `ssh`
+      communicator. This change should have no impact to most vagrant operations
+      but may break behavior when uploading directories to an existing
+      destination target. The `file` provisioner should be the only builtin
+      provisioner affected by this change. When uploading a directory and the
+      destination directory exists on the endpoint, the source base directory
+      will be created below the destination directory on the endpoint and the
+      source directory contents will be unzipped to that location. Prior to this
+      release, the contents of the source directory would be unzipped to an
+      existing destination directory without creating the source base directory.
+      This new behavior is more consistent with SCP and other well known shell copy commands.
+  - The Chef provisioner's `channel` default value has changed from "current" to
+      "stable". The "current" channel includes nightly releases and should be
+      opt-in only. Note that users wishing to download the Chef Development Kit
+      will need to opt into the "current" channel until Chef Software promotes
+      into the "stable" channel.
+  - The Arch Linux host capability for NFS removed support for rc.d in favor or
+      systemd which has been present since 2012. Please see GH-7181 for more
+      information.
+
+FEATURES:
+
+  - provider/docker: Allow non-linux users to opt-out of the host VM to run
+      Docker containers by setting `config.force_host_vm = false` in the
+      Vagrantfile. This is especially useful for customers who wish to use
+      the beta builds for Mac and Windows, dlite, or a custom provider.
+      [GH-7277, GH-7298, 8c11b53]
+  - provider/docker: New command: `docker-exec` allows attaching to an
+      already-running container.
+      [GH-7377, GH-6566, GH-5193, GH-4904, GH-4057, GH-4179, GH-4903]
+
+IMPROVEMENTS:
+
+  - core/downloader: increase box resume download limit to 24h
+      [GH-7352, GH-7272]
+  - core/package: run validations prior to packaging [GH-7353, GH-7351]
+  - core/action: make `start` ("vagrant up") run provisioners [GH-4467, GH-4421]
+  - commands/all: Make it clear that machine IDs can be specified
+      [GH-7356, GH-7228]
+  - commands/init: Add support for specifying the box version [GH-7363, GH-5004]
+  - commands/login: Print a warning with both the environment variable and
+      local login token are present [GH-7206, GH-7219]
+  - communicators/winrm: Upgrade to latest WinRM gems [GH-6922]
+  - provisioners/ansible_local: Allow to install Ansible from pip,
+      with version selection capability [GH-6654, GH-7167]
+  - provisioners/ansible_local: Use `provisioning_path` as working directory
+      for `ansible-galaxy` execution
+  - provisioners/ansible(both provisioners): Add basic config
+      validators/converters on `raw_arguments` and `raw_ssh_args` options
+      [GH-7103]
+  - provisioners/chef: Add the ability to install on SUSE [GH-6806]
+  - provisioners/chef: Support legacy solo mode [GH-7327]
+  - provisioners/docker: Restart container if newer image is available
+      [GH-7358, GH-6620]
+  - hosts/arch: Remove sysvinit and assume systemd [GH-7181]
+  - hosts/linux: Do not use a pager with systemctl commands [GH-7270]
+  - hosts/darwin: Add `extra_args` support for RDP [GH-5523, GH-6602]
+  - hosts/windows: Use SafeExec to capture history in Powershell [GH-6749]
+  - guests/amazon: Add detection [GH-7395, GH-7254]
+  - guests/freebsd: Add quotes around hostname [GH-6867]
+  - guests/fedora: Add support for ipv6 static networks [GH-7275, GH-7276]
+  - guests/tinycore: Add support for shared folders [GH-6977, GH-6968]
+  - guests/trisquel: Add initial support [GH-6842, GH-6843]
+  - guests/windows: Add support for automatic login (no password prompting)
+      [GH-5670]
+  - core: Add `--no-delete` and provisioning flags to snapshot restore/pop
+      [GH-6879]
+  - providers/docker: Allow TCP and UDP ports on the same number [GH-7365,
+      GH-5527]
+  - providers/hyperv: Add support for differencing disk [GH-7090]
+  - providers/hyperv: Add support for snapshots [GH-7110]
+  - providers/hyperv: Reinstate compatibility with PS 4 [GH-7108]
+  - providers/virtualbox: Add linked clone support for Virtualbox 1.4 [GH-7050]
+  - synced_folders/nfs: Read static and dynamic IPs [GH-7290, GH-7289]
+
+BUG FIXES:
+
+  - core: Bump nokogiri version to fix windows bug [GH-6766, GH-6848]
+  - core: Revert a change made to the output of the identify file [GH-6962,
+      GH-6929, GH-6589]
+  - core: Fix login command behind a proxy [GH-6898, GH-6899]
+  - core: Fix support for regular expressions on multi-machine `up`
+      [GH-6908, GH-6909]
+  - core: Allow boxes to use pre-release versions [GH-6892, GH-6893]
+  - core: Rescue `Errno:ENOTCONN` waiting for port to be open [GH-7182, GH-7184]
+  - core: Properly authenticate metadata box URLs [GH-6776, GH-7158]
+  - core: Do not run provisioners if already run on resume [GH-7059, GH-6787]
+  - core: Implement better tracking of tempfiles and tmpdirs to identify file
+      leaks [GH-7355]
+  - core: Allow SSH forwarding on Windows [GH-7287, GH-7202]
+  - core: Allow customizing `keys_only` SSH option [GH-7360, GH-4275]
+  - core: Allow customizing `paranoid` SSH option [GH-7360, GH-4275]
+  - command/box_update: Do not update the same box twice [GH-6042, GH-7379]
+  - command/init: Remove unnecessary `sudo` from generated Vagrantfile
+      [GH-7369, GH-7295]
+  - docs & core: Be consistent about the "2" in the Vagrantfile version
+      [GH-6961, GH-6963]
+  - guests/all: Refactor guest capabilities to run in a single command -
+      **please see GH-7393 for the complete list of changes!**
+  - guests/arch: Restart network after configuration [GH-7120, GH-7119]
+  - guests/debian: Do not return an error if ifdown fails [GH-7159,
+      GH-7155, GH-6871]
+  - guests/freebsd: Use `pkg` to install rsync [GH-6760]
+  - guests/freebsd: Use `netif` to configure networks [GH-5852, GH-7093]
+  - guests/coreos: Detect all interface names [GH-6608, GH-6610]
+  - providers/hyperv: Only specify Hyper-V if the parameter is support
+      [GH-7101, GH-7098]
+  - providers/virtualbox: Set maximum network adapters to 36 [GH-7293, GH-7286]
+  - providers/virtualbox: Do not fail when master VM from linked clone is
+      missing [GH-7126, GH-6742]
+  - providers/virtualbox: Use scoped overrides in preparring NFS
+      [GH-7387, GH-7386]
+  - provisioners/ansible: Fix a race condition in the concurrent generations of
+      the ansible inventory file, while running `vagrant up --parallel`
+      [GH-6526, GH-7190]
+  - provisioners/ansible_local: Don't quote the Ansible arguments defined in the
+      `raw_arguments` option [GH-7103]
+  - provisioners/ansible_local: Format json `extra_vars` with double quotes
+      [GH-6726, GH-7103]
+  - provisioners/ansible_local: Fix errors in absolute paths to playbook or
+      galaxy resources when running on a Windows host [GH-6740, GH-6757]
+  - provisioners/ansible_local: Change the way to verify `ansible-galaxy`
+      presence, to avoid a non-zero status code with Ansible 2.0 [GH-6793]
+  - provisioners/ansible(both provisioners): The Ansible configuration files
+      detection is only executed by the `provision` action [GH-6763, GH-6984]
+  - provisioners/chef: Do not use double sudo when installing
+      [GGH-6805, GH-6804]
+  - provisioners/chef: Change the default channel to "stable" (previously it
+      was "current") [GH-7001, GH-6979]
+  - provisioners/chef: Default node_name to hostname if present
+      [GH-7063, GH-7153]
+  - provisioners/docker: Fix -no-trunc command option [GH-7085]
+  - provisioners/docker: Allow provisioning when container name is specified
+      [GH-7074, GH-7086]
+  - provisioners/puppet: Use `where.exe` to locate puppet binary
+      [GH-6912, GH-6876]
+  - provisioners/salt: Move masterless config to apply to all platforms
+      [GH-7207, Gh-6924, GH-6915]
+  - pushes/ftp: Create parent directories when uploading [GH-7154, GH-6316]
+  - synced_folders/smb: Do not interpolate configuration file [GH-6906]
+
+## 1.8.1 (December 21, 2015)
+
+BUG FIXES:
+
+  - core: Don't create ".bundle" directory in pwd [GH-6717]
+  - core: Fix exception on installing VirtualBox [GH-6713]
+  - core: Do not convert standalone drive letters such as "D:" to
+      UNC paths [GH-6598]
+  - core: Fix a crash in parsing the config in some cases with network
+      configurations [GH-6730]
+  - core: Clean up temporarily files created by bundler
+    [GH-7354, GH-6301, GH-3469, GH-6231]
+  - commands/up: Smarter logic about what provider to install, avoiding
+      situations where VirtualBox was installed over the correct provider [GH-6731]
+  - guests/debian: Fix Docker install [GH-6722]
+  - provisioners/chef: convert chef version to a string before comparing for
+    the command builder [GH-6709, GH-6711]
+  - provisioners/shell: convert env var values to strings [GH-6714]
+
+## 1.8.0 (December 21, 2015)
+
+FEATURES:
+
+  - **New Command: `vagrant powershell`**: For machines that support it,
+    this will open a PowerShell prompt.
+  - **New Command: `vagrant port`**: For machines that support it, this will
+    display the list of forwarded ports from the guest to the host.
+  - **Linked Clones**: VirtualBox and VMware providers now support
+    linked clones for very fast (millisecond) imports on up. [GH-4484]
+  - **Snapshots**: The `vagrant snapshot` command can be used to checkpoint
+    and restore point-in-time snapshots.
+  - **IPv6 Private Networks**: Private networking now supports IPv6. This
+    only works with VirtualBox and VMware at this point. [GH-6342]
+  - New provisioner: `ansible_local` to execute Ansible from the guest
+    machine. [GH-2103]
+
+BREAKING CHANGES:
+
+  - The `ansible` provisioner now can override the effective ansible remote user
+    (i.e. `ansible_ssh_user` setting) to always correspond to the vagrant ssh
+    username. This change is enabled by default, but we expect this to affect
+    only a tiny number of people as it corresponds to the common usage.
+    If you however use multiple remote usernames in your Ansible plays, tasks,
+    or custom inventories, you can simply set the option `force_remote_user` to
+    false to make Vagrant behave the same as before.
+  - provisioners/salt: the "config_dir" option has been removed. It has no
+      effect in Vagrant 1.8. [GH-6073]
+
+IMPROVEMENTS:
+
+  - core: allow removal of all box versions with `--all` flag [GH-3462]
+  - core: prune entries from global status on non-existent cwd [GH-6535]
+  - core: networking: allow specifying a DHCP IP [GH-6325]
+  - core: run provisioner cleanup tasks before powering off the VM [GH-6553]
+  - core: only run provisioner cleanup tasks if they're implemented [GH-6603]
+      This improves UX, but wasn't a bug before.
+  - command/plugin: Add `--plugin-clean-sources` flag to reset plugin install
+      sources, primarily for corp firewalls. [GH-4738]
+  - command/rsync-auto: SSH connection is cached for faster sync times [GH-6399]
+  - command/up: provisioners are run on suspend resume [GH-5815]
+  - communicators/ssh: allow specifying host environment variables to forward
+    to guests [GH-4132, GH-6562]
+  - communicators/winrm: Configurable execution time limit [GH-6213]
+  - providers/virtualbox: cache version lookup, which caused significant
+      slowdown on some Windows hosts [GH-6552]
+  - providers/virtualbox: add `public_address` capability for virtualbox
+    [GH-6583, GH-5978]
+  - provisioners/chef: perform cleanup tasks on the guest instead of the host
+  - provisioners/chef: automatically generate a node_name if one was not given
+    [GH-6555]
+  - provisioners/chef: install Chef automatically on Windows [GH-6557]
+  - provisioners/chef: allow the user to specify the Chef product (such as
+    the Chef Development Kit) [GH-6557]
+  - provisioners/chef: allow data_bags_path to be an array [GH-5988, GH-6561]
+  - provisioners/shell: Support interactive mode for elevated PowerShell
+      scripts [GH-6185]
+  - provisioners/shell: add `env` option [GH-6588, GH-6516]
+  - provisioners/ansible+ansible_local: add support for ansible-galaxy [GH-2718]
+  - provisioners/ansible+ansible_local: add support for group and host variables
+      in the generated inventory [GH-6619]
+  - provisioners/ansible+ansible_local: add support for alphanumeric patterns
+      for groups in the generated inventory [GH-3539]
+  - provisioners/ansible: add support for WinRM settings [GH-5086]
+  - provisioners/ansible: add new `force_remote_user` option to control whether
+    `ansible_ssh_user` parameter should be applied or not [GH-6348]
+  - provisioners/ansible: show a warning when running from a Windows Host [GH-5292]
+  - pushes/local-exec: add support for specifying script args [GH-6661, GH-6660]
+  - guests/slackware: add support for networking [GH-6514]
+
+BUG FIXES:
+
+  - core: Ctrl-C weirdness fixed where it would exit parent process
+      before Vagrant finished cleaning up [GH-6085]
+  - core: DHCP network configurations don't warn on IP addresses ending
+      in ".1" [GH-6150]
+  - core: only append `access_token` when it does not exist in the URL
+    [GH-6395, GH-6534]
+  - core: use the correct private key when packaging a box [GH-6406]
+  - core: fix crash when using invalid box checksum type [GH-6327]
+  - core: don't check for metadata if the download URL is not HTTP [GH-6540]
+  - core: don't make custom dotfile path if there is no Vagrantfile [GH-6542]
+  - core: more robust check for admin privs on Windows [GH-5616]
+  - core: properly detect when HTTP server doesn't support byte ranges and
+      retry from scratch [GH-4479]
+  - core: line numbers show properly in Vagrantfile syntax errors
+      on Windows [GH-6445]
+  - core: catch errors setting env vars on Windows [GH-6017]
+  - core: remove cached synced folders when they're removed from the
+      Vagrantfile [GH-6567]
+  - core: use case-insensitive comparison for box checksum validations
+    [GH-6648, GH-6650]
+  - commands/box: add command with `~` paths on Windows works [GH-5747]
+  - commands/box: the update command supports CA settings [GH-4473]
+  - commands/box: removing all versions and providers of a box will properly
+      clean all directories in `~/.vagrant.d/boxes` [GH-3570]
+  - commands/box: outdated global won't halt on metadata download failure [GH-6453]
+  - commands/login: respect environment variables in `vagrant login` command
+    [GH-6590, GH-6422]
+  - commands/package: when re-packaging a packaged box, preserve the
+      generated SSH key [GH-5780]
+  - commands/plugin: retry plugin install automatically a few times to
+      avoid network issues [GH-6097]
+  - commands/rdp: prefer `xfreerdp` if it is available on Linux [GH-6475]
+  - commands/up: the `--provision-with` flag works with provisioner names [GH-5981]
+  - communicator/ssh: fix potential crash case with PTY [GH-6225]
+  - communicator/ssh: escape IdentityFile path [GH-6428, GH-6589]
+  - communicator/winrm: respect `boot_timeout` setting [GH-6229]
+  - communicator/winrm: execute scheduled tasks immediately on Windows XP
+      since elevation isn't required [GH-6195]
+  - communicator/winrm: Decouple default port forwarding rules for "winrm" and
+      "winrm-ssl" [GH-6581]
+  - communicator/winrm: Hide progress bars from PowerShell v5 [GH-6309]
+  - guests/arch: enable network device after setting it up [GH-5737]
+  - guests/darwin: advanced networking works with more NICs [GH-6386]
+  - guests/debian: graceful shutdown works properly with newer releases [GH-5986]
+  - guests/fedora: Preserve `localhost` entry when changing hostname [GH-6203]
+  - guests/fedora: Use dnf if it is available [GH-6288]
+  - guests/linux: when replacing a public SSH key, use POSIX-compliant
+      sed flags [GH-6565]
+  - guests/suse: DHCP network interfaces properly configured [GH-6502]
+  - hosts/slackware: Better detection of NFS [GH-6367]
+  - providers/hyper-v: support generation 2 VMs [GH-6372]
+  - providers/hyper-v: support VMs with more than one NIC [GH-4346]
+  - providers/hyper-v: check if user is in the Hyper-V admin group if
+      they're not a Windows admin [GH-6662]
+  - providers/virtualbox: ignore "Unknown" status bridge interfaces [GH-6061]
+  - providers/virtualbox: only fix ipv6 interfaces that are in use
+      [GH-6586, GH-6552]
+  - provisioners/ansible: use quotes for the `ansible_ssh_private_key_file`
+    value in the generated inventory [GH-6209]
+  - provisioners/ansible: use quotes when passing the private key files via
+      OpenSSH `-i` command line arguments [GH-6671]
+  - provisioners/ansible: don't show the `ansible-playbook` command when verbose
+    option is an empty string
+  - provisioners/chef: fix `nodes_path` for Chef Zero [GH-6025, GH-6049]
+  - provisioners/chef: do not error when the `node_name` is unset
+    [GH-6005, GH-6064, GH-6541]
+  - provisioners/chef: only force the formatter on Chef 11 or higher
+    [GH-6278, GH-6556]
+  - provisioners/chef: require `nodes_path` to be set for Chef Zero
+    [GH-6110, GH-6559]
+  - provisioners/puppet: apply provisioner uses correct default manifests
+    with environments. [GH-5987]
+  - provisioners/puppet: remove broken backticks [GH-6404]
+  - provisioners/puppet: find Puppet binary properly on Windows [GH-6259]
+  - provisioners/puppet-server: works with Puppet Collection 1 [GH-6389]
+  - provisioners/salt: call correct executables on Windows [GH-5999]
+  - provisioners/salt: log level and colorize works for masterless [GH-6474]
+  - push/local-exec: use subprocess on windows when fork does not exist
+    [GH-5307, GH-6563]
+  - push/heroku: use current branch [GH-6554]
+  - synced\_folders/rsync: on Windows, replace all paths with Cygwin
+      paths since all rsync implementations require this [GH-6160]
+  - synced\_folders/smb: use credentials files to allow for more characters
+      in password [GH-4230]
+
+PLUGIN AUTHOR CHANGES:
+
+  - installer: Upgrade to Ruby 2.2.3
+
 ## 1.7.4 (July 17, 2015)
 
 BUG FIXES:
@@ -6,6 +430,7 @@ BUG FIXES:
   - communicators/ssh: use the same SSH args for `vagrant ssh` with and without
     a command [GH-4986, GH-5928]
   - guests/fedora: networks can be configured without nmcli [GH-5931]
+  - guests/fedora: biosdevname can return 4 or 127 [GH-6139]
   - guests/redhat: systemd detection should happen on guest [GH-5948]
   - guests/ubuntu: setting hostname fixed in 12.04 [GH-5937]
   - hosts/linux: NFS can be configured without `$TMP` set on the host [GH-5954]
@@ -411,7 +836,7 @@ BUG FIXES:
   - commands/package: base package won't crash with exception [GH-4017]
   - commands/rsync-auto: Destroyed machines won't raise exceptions. [GH-4031]
   - commands/ssh: Extra args are passed through to Docker container. [GH-4378]
-  - communicators/ssh: Nicer error if remote unexpectedly disconects. [GH-4038]
+  - communicators/ssh: Nicer error if remote unexpectedly disconnects. [GH-4038]
   - communicators/ssh: Clean error when max sessions is hit. [GH-4044]
   - communicators/ssh: Fix many issues around PTY-enabled output parsing.
       [GH-4408]
@@ -1120,7 +1545,7 @@ IMPROVEMENTS:
     certs from a custom CA. [GH-2337]
   - commands/box/add: Can now specify a client cert when downloading a
     box. [GH-1889]
-  - commands/init: Add `--output` option for specifing output path, or
+  - commands/init: Add `--output` option for specifying output path, or
     "-" for stdin. [GH-1364]
   - commands/provision: Add `--no-parallel` option to disable provider
     parallelization if the provider supports it. [GH-2404]
@@ -2659,7 +3084,7 @@ compatibility.
     in a saved state. [GH-123]
   - Added `config.chef.recipe_url` which allows you to specify a URL to
     a gzipped tar file for chef solo to download cookbooks. See the
-    [chef-solo docs](http://wiki.opscode.com/display/chef/Chef+Solo#ChefSolo-RunningfromaURL) for more information.
+    [chef-solo docs](https://docs.chef.io/chef_solo.html) for more information.
     [GH-121]
   - Added `vagrant box repackage` which repackages boxes which have
     been added. This is useful in case you want to redistribute a base
@@ -2670,4 +3095,3 @@ compatibility.
 The changelog began with version 0.5.1 so any changes prior to that
 can be seen by checking the tagged releases and reading git commit
 messages.
-

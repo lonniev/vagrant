@@ -25,17 +25,59 @@ describe Vagrant::Environment do
   let(:instance)  { env.create_vagrant_env }
   subject { instance }
 
+  describe "#can_install_provider?" do
+    let(:plugin_hosts) { {} }
+    let(:plugin_host_caps) { {} }
+
+    before do
+      m = Vagrant.plugin("2").manager
+      m.stub(hosts: plugin_hosts)
+      m.stub(host_capabilities: plugin_host_caps)
+
+      # Detect the host
+      env.vagrantfile <<-VF
+      Vagrant.configure("2") do |config|
+        config.vagrant.host = nil
+      end
+      VF
+
+      # Setup the foo host by default
+      plugin_hosts[:foo] = [detect_class(true), nil]
+    end
+
+    it "should return whether it can install or not" do
+      plugin_host_caps[:foo] = { provider_install_foo: Class }
+
+      expect(subject.can_install_provider?(:foo)).to be_true
+      expect(subject.can_install_provider?(:bar)).to be_false
+    end
+  end
+
+  describe "#install_provider" do
+    let(:host) { double(:host) }
+
+    before do
+      allow(subject).to receive(:host).and_return(host)
+    end
+
+    it "should install the correct provider" do
+      expect(host).to receive(:capability).with(:provider_install_foo)
+
+      subject.install_provider(:foo)
+    end
+  end
+
   describe "#home_path" do
     it "is set to the home path given" do
-      Dir.mktmpdir do |dir|
+      Dir.mktmpdir("vagrant-test-env-home-path-given") do |dir|
         instance = described_class.new(home_path: dir)
         expect(instance.home_path).to eq(Pathname.new(dir))
       end
     end
 
     it "is set to the environmental variable VAGRANT_HOME" do
-      Dir.mktmpdir do |dir|
-        instance = with_temp_env("VAGRANT_HOME" => dir) do
+      Dir.mktmpdir("vagrant-test-env-home-env-var") do |dir|
+        instance = with_temp_env("VAGRANT_HOME" => dir.to_s) do
           described_class.new
         end
 
@@ -57,7 +99,7 @@ describe Vagrant::Environment do
       end
 
       it "is okay if it has the current version" do
-        Dir.mktmpdir do |dir|
+        Dir.mktmpdir("vagrant-test-env-current-version") do |dir|
           Pathname.new(dir).join("setup_version").open("w") do |f|
             f.write(Vagrant::Environment::CURRENT_SETUP_VERSION)
           end
@@ -70,7 +112,7 @@ describe Vagrant::Environment do
       end
 
       it "raises an exception if the version is newer than ours" do
-        Dir.mktmpdir do |dir|
+        Dir.mktmpdir("vagrant-test-env-newer-version") do |dir|
           Pathname.new(dir).join("setup_version").open("w") do |f|
             f.write("100.5")
           end
@@ -81,7 +123,7 @@ describe Vagrant::Environment do
       end
 
       it "raises an exception if there is an unknown home directory version" do
-        Dir.mktmpdir do |dir|
+        Dir.mktmpdir("vagrant-test-env-unknown-home") do |dir|
           Pathname.new(dir).join("setup_version").open("w") do |f|
             f.write("0.7")
           end
@@ -603,7 +645,7 @@ VF
 
   describe "active machines" do
     it "should be empty if there is no root path" do
-      Dir.mktmpdir do |temp_dir|
+      Dir.mktmpdir("vagrant-test-env-no-root-path") do |temp_dir|
         instance = described_class.new(cwd: temp_dir)
         expect(instance.active_machines).to be_empty
       end
@@ -673,7 +715,7 @@ VF
 
   describe "current working directory" do
     it "is the cwd by default" do
-      Dir.mktmpdir do |temp_dir|
+      Dir.mktmpdir("vagrant-test-env-cwd-default") do |temp_dir|
         Dir.chdir(temp_dir) do
           with_temp_env("VAGRANT_CWD" => nil) do
             expect(described_class.new.cwd).to eq(Pathname.new(Dir.pwd))
@@ -683,14 +725,14 @@ VF
     end
 
     it "is set to the cwd given" do
-      Dir.mktmpdir do |directory|
+      Dir.mktmpdir("vagrant-test-env-set-cwd") do |directory|
         instance = described_class.new(cwd: directory)
         expect(instance.cwd).to eq(Pathname.new(directory))
       end
     end
 
     it "is set to the environmental variable VAGRANT_CWD" do
-      Dir.mktmpdir do |directory|
+      Dir.mktmpdir("vagrant-test-env-set-vagrant-cwd") do |directory|
         instance = with_temp_env("VAGRANT_CWD" => directory) do
           described_class.new
         end
@@ -863,20 +905,103 @@ VF
     end
 
     it "is expanded relative to the cwd" do
-      instance = described_class.new(local_data_path: "foo")
-      expect(instance.local_data_path).to eq(instance.cwd.join("foo"))
+      Dir.mktmpdir("vagrant-test-env-relative-cwd") do |temp_dir|
+        Dir.chdir(temp_dir) do
+          instance = described_class.new(local_data_path: "foo")
+          expect(instance.local_data_path).to eq(instance.cwd.join("foo"))
+          expect(File.exist?(instance.local_data_path)).to be_false
+        end
+      end
     end
 
     it "is set to the given value" do
-      Dir.mktmpdir do |dir|
+      Dir.mktmpdir("vagrant-test-env-set-given") do |dir|
         instance = described_class.new(local_data_path: dir)
         expect(instance.local_data_path.to_s).to eq(dir)
       end
     end
 
+    context "with environmental variable VAGRANT_DOTFILE_PATH set to the empty string" do
+      it "is set to the default, from the work directory" do
+        with_temp_env("VAGRANT_DOTFILE_PATH" => "") do
+          instance = env.create_vagrant_env
+          expect(instance.cwd).to eq(env.workdir)
+          expect(instance.local_data_path.to_s).to eq(File.join(env.workdir, ".vagrant"))
+        end
+      end
+
+      it "is set to the default, from a sub-directory of the work directory" do
+        Dir.mktmpdir("sub-directory", env.workdir) do |temp_dir|
+          with_temp_env("VAGRANT_DOTFILE_PATH" => "") do
+            instance = env.create_vagrant_env(cwd: temp_dir)
+            expect(instance.cwd.to_s).to eq(temp_dir)
+            expect(instance.local_data_path.to_s).to eq(File.join(env.workdir, ".vagrant"))
+          end
+        end
+      end
+    end
+
+    context "with environmental variable VAGRANT_DOTFILE_PATH set to an absolute path" do
+      it "is set to VAGRANT_DOTFILE_PATH from the work directory" do
+        Dir.mktmpdir("sub-directory", env.workdir) do |temp_dir|
+          dotfile_path = File.join(temp_dir, ".vagrant-custom")
+
+          with_temp_env("VAGRANT_DOTFILE_PATH" => dotfile_path) do
+            instance = env.create_vagrant_env
+            expect(instance.cwd).to eq(env.workdir)
+            expect(instance.local_data_path.to_s).to eq(dotfile_path)
+          end
+        end
+      end
+
+      it "is set to VAGRANT_DOTFILE_PATH from a sub-directory of the work directory" do
+        Dir.mktmpdir("sub-directory", env.workdir) do |temp_dir|
+          dotfile_path = File.join(temp_dir, ".vagrant-custom")
+
+          with_temp_env("VAGRANT_DOTFILE_PATH" => dotfile_path) do
+            instance = env.create_vagrant_env(cwd: temp_dir)
+            expect(instance.cwd.to_s).to eq(temp_dir)
+            expect(instance.local_data_path.to_s).to eq(dotfile_path)
+          end
+        end
+      end
+    end
+
+    context "with environmental variable VAGRANT_DOTFILE_PATH set to a relative path" do
+      it "is set relative to the the work directory, from the work directory" do
+        Dir.mktmpdir("sub-directory", env.workdir) do |temp_dir|
+          with_temp_env("VAGRANT_DOTFILE_PATH" => ".vagrant-custom") do
+            instance = env.create_vagrant_env
+            expect(instance.cwd).to eq(env.workdir)
+            expect(instance.local_data_path.to_s).to eq(File.join(env.workdir, ".vagrant-custom"))
+          end
+        end
+      end
+
+      it "is set relative to the the work directory, from a sub-directory of the work directory" do
+        Dir.mktmpdir("sub-directory", env.workdir) do |temp_dir|
+          with_temp_env("VAGRANT_DOTFILE_PATH" => ".vagrant-custom") do
+            instance = env.create_vagrant_env(cwd: temp_dir)
+            expect(instance.cwd.to_s).to eq(temp_dir)
+            expect(instance.local_data_path.to_s).to eq(File.join(env.workdir, ".vagrant-custom"))
+          end
+        end
+      end
+
+      it "is set to the empty string when there is no valid work directory" do
+        Dir.mktmpdir("out-of-tree-directory") do |temp_dir|
+          with_temp_env("VAGRANT_DOTFILE_PATH" => ".vagrant-custom") do
+            instance = env.create_vagrant_env(cwd: temp_dir)
+            expect(instance.cwd.to_s).to eq(temp_dir)
+            expect(instance.local_data_path.to_s).to eq("")
+          end
+        end
+      end
+    end
+
     describe "upgrading V1 dotfiles" do
       let(:v1_dotfile_tempfile) do
-        Tempfile.new("vagrant").tap do |f|
+        Tempfile.new("vagrant-upgrade-dotfile").tap do |f|
           f.close
         end
       end
@@ -885,13 +1010,17 @@ VF
       let(:local_data_path)     { v1_dotfile_tempfile.path }
       let(:instance) { described_class.new(local_data_path: local_data_path) }
 
+      after do
+        FileUtils.rm_rf(local_data_path)
+      end
+
       it "should be fine if dotfile is empty" do
         v1_dotfile.open("w+") do |f|
           f.write("")
         end
 
         expect { instance }.to_not raise_error
-        expect(Pathname.new(local_data_path)).to be_directory
+        expect(Pathname.new(local_data_path)).to_not be_exist
       end
 
       it "should upgrade all active VMs" do

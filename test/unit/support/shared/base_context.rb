@@ -1,6 +1,8 @@
 require "tempfile"
 require "tmpdir"
 
+require "vagrant/util/platform"
+
 require "unit/support/isolated_environment"
 
 shared_context "unit" do
@@ -58,32 +60,41 @@ shared_context "unit" do
   #
   # @return [Pathname]
   def temporary_file(contents=nil)
-    f = Tempfile.new("vagrant-unit")
+    dir = temporary_dir
+    f = dir.join("tempfile")
 
-    if contents
+    contents ||= ""
+    f.open("w") do |f|
       f.write(contents)
       f.flush
     end
 
-    # Store the tempfile in an instance variable so that it is not
-    # garbage collected, so that the tempfile is not unlinked.
-    @_temp_files << f
-
-    return Pathname.new(f.path)
+    return Pathname.new(Vagrant::Util::Platform.fs_real_path(f.to_s))
   end
 
   # This creates a temporary directory and returns a {Pathname}
-  # pointing to it.
+  # pointing to it. If a block is given, the pathname is yielded and the
+  # temporary directory is removed at the end of the block.
   #
   # @return [Pathname]
   def temporary_dir
     # Create a temporary directory and append it to the instance
     # variabe so that it isn't garbage collected and deleted
-    d = Dir.mktmpdir("vagrant")
+    d = Dir.mktmpdir("vagrant-temporary-dir")
+    @_temp_files ||= []
     @_temp_files << d
 
     # Return the pathname
-    return Pathname.new(d)
+    result = Pathname.new(Vagrant::Util::Platform.fs_real_path(d))
+    if block_given?
+      begin
+        yield result
+      ensure
+        FileUtils.rm_rf(result)
+      end
+    end
+
+    return result
   end
 
   # Stub the given environment in ENV, without actually touching ENV. Keys and
@@ -104,6 +115,7 @@ shared_context "unit" do
     # can replace them back in later.
     old_env = {}
     environment.each do |key, value|
+      key          = key.to_s
       old_env[key] = ENV[key]
       ENV[key]     = value
     end
@@ -115,5 +127,19 @@ shared_context "unit" do
     old_env.each do |key, value|
       ENV[key] = value
     end
+  end
+
+  # This helper provides a randomly available port(s) for each argument to the
+  # block.
+  def with_random_port(&block)
+    ports = []
+
+    block.arity.times do
+      server = TCPServer.new('127.0.0.1', 0)
+      ports << server.addr[1]
+      server.close
+    end
+
+    block.call(*ports)
   end
 end

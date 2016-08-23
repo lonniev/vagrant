@@ -5,10 +5,16 @@ module VagrantPlugins
     module Cap
       module Redhat
         module ChefInstall
-          def self.chef_install(machine, version, prerelease, download_path)
-            machine.communicate.sudo("yum install -y -q curl")
+          def self.chef_install(machine, project, version, channel, options = {})
+            machine.communicate.sudo <<-EOH.gsub(/^ {14}/, '')
+              if command -v dnf; then
+                dnf -y install curl
+              else
+                yum -y install curl
+              fi
+            EOH
 
-            command = Omnibus.build_command(version, prerelease, download_path)
+            command = Omnibus.sh_command(project, version, channel, options)
             machine.communicate.sudo(command)
           end
         end

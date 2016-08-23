@@ -6,7 +6,7 @@ require "tempfile"
 
 require "vagrant/box_metadata"
 
-describe Vagrant::Box do
+describe Vagrant::Box, :skip_windows do
   include_context "unit"
 
   let(:environment)   { isolated_environment }
@@ -227,7 +227,7 @@ describe Vagrant::Box do
 
   context "#load_metadata" do
     let(:metadata_url) do
-      Tempfile.new("vagrant").tap do |f|
+      Tempfile.new("vagrant-test-box-test").tap do |f|
         f.write(<<-RAW)
         {
           "name": "foo",
@@ -242,6 +242,10 @@ describe Vagrant::Box do
       described_class.new(
         name, provider, version, directory,
         metadata_url: metadata_url.path)
+    end
+
+    after do
+      metadata_url.unlink
     end
 
     it "loads the url and returns the data" do
@@ -286,6 +290,14 @@ describe Vagrant::Box do
   end
 
   describe "repackaging" do
+    let(:scratch) { Dir.mktmpdir("vagrant-test-box-repackaging") }
+
+    let(:box_output_path) { File.join(scratch, "package.box") }
+
+    after do
+      FileUtils.rm_rf(scratch)
+    end
+
     it "should repackage the box" do
       test_file_contents = "hello, world!"
 
@@ -296,7 +308,6 @@ describe Vagrant::Box do
       end
 
       # Repackage our box to some temporary directory
-      box_output_path = temporary_dir.join("package.box")
       expect(subject.repackage(box_output_path)).to be_true
 
       # Let's now add this box again under a different name, and then

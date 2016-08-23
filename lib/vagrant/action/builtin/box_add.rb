@@ -18,6 +18,10 @@ module Vagrant
         # to NOT be metadata.
         METADATA_SIZE_LIMIT = 20971520
 
+        # This is the amount of time to "resume" downloads if a partial box
+        # file already exists.
+        RESUME_DELAY = 24 * 60 * 60
+
         def initialize(app, env)
           @app    = app
           @logger = Log4r::Logger.new("vagrant::action::builtin::box_add")
@@ -30,7 +34,7 @@ module Vagrant
             u = u.gsub("\\", "/")
             if Util::Platform.windows? && u =~ /^[a-z]:/i
               # On Windows, we need to be careful about drive letters
-              u = "file://#{URI.escape(u)}"
+              u = "file:///#{URI.escape(u)}"
             end
 
             if u =~ /^[a-z0-9]+:.*$/i && !u.start_with?("file://")
@@ -253,7 +257,7 @@ module Vagrant
           end
 
           provider_url = metadata_provider.url
-          if url != authenticated_url
+          if provider_url != authenticated_url
             # Authenticate the provider URL since we're using auth
             hook_env    = env[:hook].call(:authenticate_box_url, box_urls: [provider_url])
             authed_urls = hook_env[:box_urls]
@@ -261,7 +265,7 @@ module Vagrant
               raise "Bad box authentication hook, did not generate proper results."
             end
             provider_url = authed_urls[0]
-          end
+        end
 
           box_add(
             [[provider_url, metadata_provider.url]],
@@ -381,7 +385,9 @@ module Vagrant
             @logger.info("URL is a file or protocol not found and assuming file.")
             file_path = File.expand_path(url)
             file_path = Util::Platform.cygwin_windows_path(file_path)
-            url = "file:#{file_path}"
+            file_path = file_path.gsub("\\", "/")
+            file_path = "/#{file_path}" if !file_path.start_with?("/")
+            url = "file://#{file_path}"
           end
 
           # If the temporary path exists, verify it is not too old. If its
@@ -391,7 +397,7 @@ module Vagrant
             if env[:box_clean]
               @logger.info("Cleaning existing temp box file.")
               delete = true
-            elsif temp_path.mtime.to_i < (Time.now.to_i - 6 * 60 * 60)
+            elsif temp_path.mtime.to_i < (Time.now.to_i - RESUME_DELAY)
               @logger.info("Existing temp file is too old. Removing.")
               delete = true
             end
@@ -466,6 +472,8 @@ module Vagrant
           if uri.scheme == "file"
             url = uri.path
             url ||= uri.opaque
+            #7570 Strip leading slash left in front of drive letter by uri.path
+            Util::Platform.windows? && url.gsub!(/^\/([a-zA-Z]:)/, '\1')
 
             begin
               File.open(url, "r") do |f|
@@ -491,6 +499,12 @@ module Vagrant
             end
           end
 
+          # If this isn't HTTP, then don't do the HEAD request
+          if !uri.scheme.downcase.start_with?("http")
+            @logger.info("not checking metadata since box URI isn't HTTP")
+            return false
+          end
+
           output = d.head
           match  = output.scan(/^Content-Type: (.+?)$/i).last
           return false if !match
@@ -507,14 +521,14 @@ module Vagrant
             Digest::SHA2
           else
             raise Errors::BoxChecksumInvalidType,
-              type: env[:box_checksum_type].to_s
+              type: checksum_type.to_s
           end
 
           @logger.info("Validating checksum with #{checksum_klass}")
           @logger.info("Expected checksum: #{checksum}")
 
           actual = FileChecksum.new(path, checksum_klass).checksum
-          if actual != checksum
+          if actual.casecmp(checksum) != 0
             raise Errors::BoxChecksumMismatch,
               actual: actual,
               expected: checksum

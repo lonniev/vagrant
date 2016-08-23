@@ -46,12 +46,21 @@ module VagrantPlugins
         def create_host_only_network(options)
           # Create the interface
           execute("hostonlyif", "create") =~ /^Interface '(.+?)' was successfully created$/
-            name = $1.to_s
+          name = $1.to_s
 
-          # Configure it
-          execute("hostonlyif", "ipconfig", name,
-                  "--ip", options[:adapter_ip],
-                  "--netmask", options[:netmask])
+          # Get the IP so we can determine v4 vs v6
+          ip = IPAddr.new(options[:adapter_ip])
+
+          # Configure
+          if ip.ipv4?
+            execute("hostonlyif", "ipconfig", name,
+                    "--ip", options[:adapter_ip],
+                    "--netmask", options[:netmask])
+          elsif ip.ipv6?
+            execute("hostonlyif", "ipconfig", name,
+                    "--ipv6", options[:adapter_ip],
+                    "--netmasklengthv6", options[:netmask].to_s)
+          end
 
           # Return the details
           return {
@@ -229,7 +238,7 @@ module VagrantPlugins
         end
 
         def max_network_adapters
-          36
+          8
         end
 
         def read_forwarded_ports(uuid=nil, active_only=false)
@@ -356,6 +365,10 @@ module VagrantPlugins
                 info[:ip] = $1.to_s
               elsif line =~ /^NetworkMask:\s+(.+?)$/
                 info[:netmask] = $1.to_s
+              elsif line =~ /^IPV6Address:\s+(.+?)$/
+                info[:ipv6] = $1.to_s.strip
+              elsif line =~ /^IPV6NetworkMaskPrefixLength:\s+(.+?)$/
+                info[:ipv6_prefix] = $1.to_s.strip
               elsif line =~ /^Status:\s+(.+?)$/
                 info[:status] = $1.to_s
               end
@@ -463,6 +476,11 @@ module VagrantPlugins
           end
 
           results
+        end
+
+        def reconfig_host_only(interface)
+          execute("hostonlyif", "ipconfig", interface[:name],
+                  "--ipv6", interface[:ipv6])
         end
 
         def remove_dhcp_server(network_name)
@@ -576,9 +594,9 @@ module VagrantPlugins
             result = raw("showvminfo", uuid)
             return true if result.exit_code == 0
 
-            # GH-2479: Sometimes this happens. In this case, retry. If
-            # we don't see this text, the VM really probably doesn't exist.
-            return false if !result.stderr.include?("CO_E_SERVER_EXEC_FAILURE")
+            # If vboxmanage returned VBOX_E_OBJECT_NOT_FOUND,
+            # then the vm truly does not exist. Any other error might be transient
+            return false if result.stderr.include?("VBOX_E_OBJECT_NOT_FOUND")
 
             # Sleep a bit though to give VirtualBox time to fix itself
             sleep 2
@@ -589,6 +607,86 @@ module VagrantPlugins
           # exception if it fails again.
           execute("showvminfo", uuid)
           return true
+        end
+
+        def create_snapshot(machine_id, snapshot_name)
+          execute("snapshot", machine_id, "take", snapshot_name)
+        end
+
+        def delete_snapshot(machine_id, snapshot_name)
+          # Start with 0%
+          last = 0
+          total = ""
+          yield 0 if block_given?
+
+          # Snapshot and report the % progress
+          execute("snapshot", machine_id, "delete", snapshot_name) do |type, data|
+            if type == :stderr
+              # Append the data so we can see the full view
+              total << data.gsub("\r", "")
+
+              # Break up the lines. We can't get the progress until we see an "OK"
+              lines = total.split("\n")
+
+              # The progress of the import will be in the last line. Do a greedy
+              # regular expression to find what we're looking for.
+              match = /.+(\d{2})%/.match(lines.last)
+              if match
+                current = match[1].to_i
+                if current > last
+                  last = current
+                  yield current if block_given?
+                end
+              end
+            end
+          end
+        end
+
+        def list_snapshots(machine_id)
+          output = execute(
+            "snapshot", machine_id, "list", "--machinereadable",
+            retryable: true)
+
+          result = []
+          output.split("\n").each do |line|
+            if line =~ /^SnapshotName.*?="(.+?)"$/i
+              result << $1.to_s
+            end
+          end
+
+          result.sort
+        rescue Vagrant::Errors::VBoxManageError => e
+          d = e.extra_data
+          return [] if d[:stderr].include?("does not have") || d[:stdout].include?("does not have")
+          raise
+        end
+
+        def restore_snapshot(machine_id, snapshot_name)
+          # Start with 0%
+          last = 0
+          total = ""
+          yield 0 if block_given?
+
+          execute("snapshot", machine_id, "restore", snapshot_name) do |type, data|
+            if type == :stderr
+              # Append the data so we can see the full view
+              total << data.gsub("\r", "")
+
+              # Break up the lines. We can't get the progress until we see an "OK"
+              lines = total.split("\n")
+
+              # The progress of the import will be in the last line. Do a greedy
+              # regular expression to find what we're looking for.
+              match = /.+(\d{2})%/.match(lines.last)
+              if match
+                current = match[1].to_i
+                if current > last
+                  last = current
+                  yield current if block_given?
+                end
+              end
+            end
+          end
         end
       end
     end

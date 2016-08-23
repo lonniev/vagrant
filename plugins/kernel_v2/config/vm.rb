@@ -5,6 +5,7 @@ require "set"
 require "vagrant"
 require "vagrant/config/v2/util"
 require "vagrant/util/platform"
+require "vagrant/util/presence"
 
 require File.expand_path("../vm_provisioner", __FILE__)
 require File.expand_path("../vm_subvm", __FILE__)
@@ -12,6 +13,8 @@ require File.expand_path("../vm_subvm", __FILE__)
 module VagrantPlugins
   module Kernel_V2
     class VMConfig < Vagrant.plugin("2", :config)
+      include Vagrant::Util::Presence
+
       DEFAULT_VM_NAME = :default
 
       attr_accessor :allowed_synced_folder_types
@@ -37,6 +40,9 @@ module VagrantPlugins
       attr_accessor :usable_port_range
       attr_reader :provisioners
 
+      # This is an experimental feature that isn't public yet.
+      attr_accessor :clone
+
       def initialize
         @logger = Log4r::Logger.new("vagrant::config::vm")
 
@@ -54,6 +60,7 @@ module VagrantPlugins
         @box_download_location_trusted = UNSET_VALUE
         @box_url                       = UNSET_VALUE
         @box_version                   = UNSET_VALUE
+        @clone                         = UNSET_VALUE
         @communicator                  = UNSET_VALUE
         @graceful_halt_timeout         = UNSET_VALUE
         @guest                         = UNSET_VALUE
@@ -357,7 +364,11 @@ module VagrantPlugins
         @base_mac = nil if @base_mac == UNSET_VALUE
         @boot_timeout = 300 if @boot_timeout == UNSET_VALUE
         @box = nil if @box == UNSET_VALUE
-        @box_check_update = true if @box_check_update == UNSET_VALUE
+
+        if @box_check_update == UNSET_VALUE
+          @box_check_update = !present?(ENV["VAGRANT_BOX_UPDATE_CHECK_DISABLE"])
+        end
+
         @box_download_ca_cert = nil if @box_download_ca_cert == UNSET_VALUE
         @box_download_ca_path = nil if @box_download_ca_path == UNSET_VALUE
         @box_download_checksum = nil if @box_download_checksum == UNSET_VALUE
@@ -367,6 +378,7 @@ module VagrantPlugins
         @box_download_location_trusted = false if @box_download_location_trusted == UNSET_VALUE
         @box_url = nil if @box_url == UNSET_VALUE
         @box_version = nil if @box_version == UNSET_VALUE
+        @clone = nil if @clone == UNSET_VALUE
         @communicator = nil if @communicator == UNSET_VALUE
         @graceful_halt_timeout = 60 if @graceful_halt_timeout == UNSET_VALUE
         @guest = nil if @guest == UNSET_VALUE
@@ -411,7 +423,8 @@ module VagrantPlugins
               host_ip: "127.0.0.1",
               id: "winrm",
               auto_correct: true
-
+          end
+          if !@__networks["forwarded_port-winrm-ssl"]
             network :forwarded_port,
               guest: 5986,
               host: 55986,
@@ -419,7 +432,9 @@ module VagrantPlugins
               id: "winrm-ssl",
               auto_correct: true
           end
-        elsif !@__networks["forwarded_port-ssh"]
+        end
+        # forward SSH ports regardless of communicator
+        if !@__networks["forwarded_port-ssh"]
           network :forwarded_port,
             guest: 22,
             host: 2222,
@@ -554,8 +569,12 @@ module VagrantPlugins
       def validate(machine)
         errors = _detected_errors
 
-        if !box && !machine.provider_options[:box_optional]
+        if !box && !clone && !machine.provider_options[:box_optional]
           errors << I18n.t("vagrant.config.vm.box_missing")
+        end
+
+        if box && clone
+          errors << I18n.t("vagrant.config.vm.clone_and_box")
         end
 
         errors << I18n.t("vagrant.config.vm.hostname_invalid_characters") if \
@@ -688,7 +707,7 @@ module VagrantPlugins
               end
             end
 
-            if options[:ip] && options[:ip].end_with?(".1")
+            if options[:ip] && options[:ip].end_with?(".1") && (options[:type] || "").to_sym != :dhcp
               machine.ui.warn(I18n.t(
                 "vagrant.config.vm.network_ip_ends_in_one"))
             end

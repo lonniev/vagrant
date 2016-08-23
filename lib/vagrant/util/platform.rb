@@ -1,6 +1,6 @@
-require 'rbconfig'
-require 'shellwords'
-require 'tmpdir'
+require "rbconfig"
+require "shellwords"
+require "tmpdir"
 
 require "vagrant/util/subprocess"
 
@@ -10,10 +10,21 @@ module Vagrant
     class Platform
       class << self
         def cygwin?
-          return true if ENV["VAGRANT_DETECTED_OS"] &&
-            ENV["VAGRANT_DETECTED_OS"].downcase.include?("cygwin")
+          return @_cygwin if defined?(@_cygwin)
+          @_cygwin = -> {
+            # Installer detects Cygwin
+            return true if ENV["VAGRANT_DETECTED_OS"] &&
+              ENV["VAGRANT_DETECTED_OS"].downcase.include?("cygwin")
 
-          platform.include?("cygwin")
+            # Ruby running in Cygwin
+            return true if platform.include?("cygwin")
+
+            # Heuristic. If the path contains Cygwin, we just assume we're
+            # in Cygwin. It is generally a safe bet.
+            path = ENV["PATH"] || ""
+            return path.include?("cygwin")
+          }.call
+          return @_cygwin
         end
 
         [:darwin, :bsd, :freebsd, :linux, :solaris].each do |type|
@@ -23,11 +34,9 @@ module Vagrant
         end
 
         def windows?
-          %W[mingw mswin].each do |text|
-            return true if platform.include?(text)
-          end
-
-          false
+          return @_windows if defined?(@_windows)
+          @_windows = %w[mingw mswin].any? { |t| platform.include?(t) }
+          return @_windows
         end
 
         # Checks if the user running Vagrant on Windows has administrative
@@ -35,20 +44,50 @@ module Vagrant
         #
         # @return [Boolean]
         def windows_admin?
+          return @_windows_admin if defined?(@_windows_admin)
+
           # We lazily-load this because it is only available on Windows
-          require 'win32/registry'
+          require "win32/registry"
 
           # Verify that we have administrative privileges. The odd method of
           # detecting this is based on this StackOverflow question:
           #
-          # http://stackoverflow.com/questions/560366/
+          # https://stackoverflow.com/questions/560366/
           #   detect-if-running-with-administrator-privileges-under-windows-xp
-          begin
-            Win32::Registry::HKEY_USERS.open("S-1-5-19") {}
-            return true
-          rescue Win32::Registry::Error
-            return false
-          end
+          @_windows_admin = -> {
+            begin
+              Win32::Registry::HKEY_USERS.open("S-1-5-19") {}
+
+              # The above doesn't seem to be 100% bullet proof. See GH-5616.
+              return (`reg query HKU\\S-1-5-19 2>&1` =~ /ERROR/).nil?
+            rescue Win32::Registry::Error
+              return false
+            end
+          }.call
+
+          return @_windows_admin
+        end
+
+        # Checks if the user running Vagrant on Windows is a member of the
+        # "Hyper-V Administrators" group.
+        #
+        # From: https://support.microsoft.com/en-us/kb/243330
+        # SID: S-1-5-32-578
+        # Name: BUILTIN\Hyper-V Administrators
+        #
+        # @return [Boolean]
+        def windows_hyperv_admin?
+          return @_windows_hyperv_admin if defined?(@_windows_hyperv_admin)
+          @_windows_hyperv_admin = -> {
+            begin
+              username = ENV["USERNAME"]
+              process = Subprocess.execute("net", "localgroup", "Hyper-V Administrators")
+              return process.stdout.include?(username)
+            rescue Errors::CommandUnavailableWindows
+              return false
+            end
+          }.call
+          return @_windows_hyperv_admin
         end
 
         # This takes any path and converts it from a Windows path to a
@@ -96,16 +135,18 @@ module Vagrant
         # directory runs a different filesystem than the root directory.
         # However, this works in many cases.
         def fs_case_sensitive?
-          Dir.mktmpdir("vagrant") do |tmp_dir|
-            tmp_file = File.join(tmp_dir, "FILE")
+          return @_fs_case_sensitive if defined?(@_fs_case_sensitive)
+          @_fs_case_sensitive = Dir.mktmpdir("vagrant-fs-case-sensitive") do |dir|
+            tmp_file = File.join(dir, "FILE")
             File.open(tmp_file, "w") do |f|
               f.write("foo")
             end
 
             # The filesystem is case sensitive if the lowercased version
             # of the filename is NOT reported as existing.
-            !File.file?(File.join(tmp_dir, "file"))
+            !File.file?(File.join(dir, "file"))
           end
+          return @_fs_case_sensitive
         end
 
         # This expands the path and ensures proper casing of each part
@@ -114,6 +155,14 @@ module Vagrant
           path = Pathname.new(File.expand_path(path))
 
           if path.exist? && !fs_case_sensitive?
+            # If the path contains a Windows short path, then we attempt to
+            # expand. The require below is embedded here since it requires
+            # windows to work.
+            if windows? && path.to_s =~ /~\d(\/|\\)/
+              require_relative "windows_path"
+              path = Pathname.new(WindowsPath.longname(path.to_s))
+            end
+
             # Build up all the parts of the path
             original = []
             while !path.root?
@@ -148,24 +197,43 @@ module Vagrant
         # @param [String] path Path to convert to UNC for Windows
         # @return [String]
         def windows_unc_path(path)
+          path = path.gsub("/", "\\")
+
+          # If the path is just a drive letter, then return that as-is
+          return path + "\\" if path =~ /^[a-zA-Z]:\\?$/
+
+          # Convert to UNC path
           "\\\\?\\" + path.gsub("/", "\\")
         end
 
         # Returns a boolean noting whether the terminal supports color.
         # output.
         def terminal_supports_colors?
-          if windows?
-            return true if ENV.key?("ANSICON")
-            return true if cygwin?
-            return true if ENV["TERM"] == "cygwin"
-            return false
-          end
+          return @_terminal_supports_colors if defined?(@_terminal_supports_colors)
+          @_terminal_supports_colors = -> {
+            if windows?
+              return true if ENV.key?("ANSICON")
+              return true if cygwin?
+              return true if ENV["TERM"] == "cygwin"
+              return false
+            end
 
-          true
+            return true
+          }.call
+          return @_terminal_supports_colors
         end
 
         def platform
-          RbConfig::CONFIG["host_os"].downcase
+          return @_platform if defined?(@_platform)
+          @_platform = RbConfig::CONFIG["host_os"].downcase
+          return @_platform
+        end
+
+        # @private
+        # Reset the cached values for platform. This is not considered a public
+        # API and should only be used for testing.
+        def reset!
+          instance_variables.each(&method(:remove_instance_variable))
         end
       end
     end

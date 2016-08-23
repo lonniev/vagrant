@@ -109,19 +109,25 @@ module Vagrant
           "-p", options[:port].to_s,
           "-o", "Compression=yes",
           "-o", "DSAAuthentication=yes",
-          "-o", "LogLevel=#{log_level}",
-          "-o", "StrictHostKeyChecking=no",
-          "-o", "UserKnownHostsFile=/dev/null"]
+          "-o", "LogLevel=#{log_level}"]
 
         # Solaris/OpenSolaris/Illumos uses SunSSH which doesn't support the
-        # IdentitiesOnly option. Also, we don't enable it in plain mode so
-        # that SSH properly searches our identities and tries to do it itself.
-        if !Platform.solaris? && !plain_mode
+        # IdentitiesOnly option. Also, we don't enable it in plain mode or if
+        # if keys_only is false so that SSH and Net::SSH properly search our identities
+        # and tries to do it itself.
+        if !Platform.solaris? && !plain_mode && ssh_info[:keys_only]
           command_options += ["-o", "IdentitiesOnly=yes"]
         end
 
-        # If we're not in plain mode, attach the private key path.
-        if !plain_mode
+        # no strict hostkey checking unless paranoid
+        if ! ssh_info[:paranoid]
+          command_options += [
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null"]
+        end
+
+        # If we're not in plain mode and :private_key_path is set attach the private key path(s).
+        if !plain_mode && options[:private_key_path]
           options[:private_key_path].each do |path|
             command_options += ["-i", path.to_s]
           end
@@ -136,6 +142,10 @@ module Vagrant
 
         if ssh_info[:proxy_command]
           command_options += ["-o", "ProxyCommand=#{ssh_info[:proxy_command]}"]
+        end
+
+        if ssh_info[:forward_env]
+          command_options += ["-o", "SendEnv=#{ssh_info[:forward_env].join(" ")}"]
         end
 
         # Configurables -- extra_args should always be last due to the way the
@@ -172,6 +182,14 @@ module Vagrant
         LOGGER.info("Executing SSH in subprocess: #{ssh} #{command_options.inspect}")
         process = ChildProcess.build(ssh, *command_options)
         process.io.inherit!
+
+        # Forward configured environment variables.
+        if ssh_info[:forward_env]
+          ssh_info[:forward_env].each do |key|
+            process.environment[key] = ENV[key]
+          end
+        end
+
         process.start
         process.wait
         return process.exit_code

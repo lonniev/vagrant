@@ -9,7 +9,7 @@ describe VagrantPlugins::FTPPush::Push do
   let(:env) { isolated_environment }
   let(:config) do
     double("config",
-      host:        "127.0.0.1:51234",
+      host:        "127.0.0.1:#{@port}",
       username:    "sethvargo",
       password:    "bacon",
       passive:     false,
@@ -34,11 +34,14 @@ describe VagrantPlugins::FTPPush::Push do
 
   describe "#push" do
     before(:all) do
-      @server = FakeFtp::Server.new(51234, 21213)
+      @server = nil
+      with_random_port do |port1, port2|
+        @port = port1
+        @server = FakeFtp::Server.new(port1, port2)
+      end
       @server.start
 
-      @dir = Dir.mktmpdir
-
+      @dir = Dir.mktmpdir("vagrant-ftp-push")
       FileUtils.touch("#{@dir}/.hidden.rb")
       FileUtils.touch("#{@dir}/application.rb")
       FileUtils.touch("#{@dir}/config.rb")
@@ -107,7 +110,7 @@ describe VagrantPlugins::FTPPush::Push do
 
   describe "#all_files" do
     before(:all) do
-      @dir = Dir.mktmpdir
+      @dir = Dir.mktmpdir("vagrant-ftp-push-push-all-files")
 
       FileUtils.touch("#{@dir}/.hidden.rb")
       FileUtils.touch("#{@dir}/application.rb")
@@ -149,9 +152,9 @@ describe VagrantPlugins::FTPPush::Push do
     end
   end
 
-  describe "includes_files" do
+  describe "#includes_files" do
     before(:all) do
-      @dir = Dir.mktmpdir
+      @dir = Dir.mktmpdir("vagrant-ftp-push-includes-files")
 
       FileUtils.touch("#{@dir}/.hidden.rb")
       FileUtils.touch("#{@dir}/application.rb")

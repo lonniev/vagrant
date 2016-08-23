@@ -67,7 +67,10 @@ describe VagrantPlugins::LoginCommand::Client do
         "token" => "baz",
       }
 
-      headers = { "Content-Type" => "application/json" }
+      headers = {
+        "Accept" => "application/json",
+        "Content-Type" => "application/json",
+      }
 
       stub_request(:post, "#{Vagrant.server_url}/api/v1/authenticate").
         with(body: JSON.dump(request), headers: headers).
@@ -107,6 +110,13 @@ describe VagrantPlugins::LoginCommand::Client do
       stub_env("ATLAS_TOKEN" => "ABCD1234")
       subject.store_token("EFGH5678")
       expect(subject.token).to eq("ABCD1234")
+    end
+
+    it "prints a warning if the envvar and stored file are both present" do
+      stub_env("ATLAS_TOKEN" => "ABCD1234")
+      subject.store_token("EFGH5678")
+      expect(env.ui).to receive(:warn).with(/detected both/)
+      subject.token
     end
 
     it "returns nil if there's no token set" do

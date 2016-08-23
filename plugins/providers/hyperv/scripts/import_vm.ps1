@@ -8,7 +8,9 @@ Param(
     [string]$memory=$null,
     [string]$maxmemory=$null,   
     [string]$cpus=$null,
-    [string]$vmname=$null
+    [string]$vmname=$null,
+    [string]$auto_start_action=$null,
+    [string]$auto_stop_action=$null
 )
 
 # Include the following modules
@@ -81,14 +83,24 @@ if (!$switchname) {
     $switchname = (Select-Xml -xml $vmconfig -XPath "//AltSwitchName").node."#text"
 }
 
-# Determine boot device
-Switch ((Select-Xml -xml $vmconfig -XPath "//boot").node.device0."#text") {
-    "Floppy"    { $bootdevice = "floppy" }
-    "HardDrive" { $bootdevice = "IDE" }
-    "Optical"   { $bootdevice = "CD" }
-    "Network"   { $bootdevice = "LegacyNetworkAdapter" }
-    "Default"   { $bootdevice = "IDE" }
-} #switch
+if ($generation -eq 1) {
+    # Determine boot device
+    Switch ((Select-Xml -xml $vmconfig -XPath "//boot").node.device0."#text") {
+        "Floppy"    { $bootdevice = "Floppy" }
+        "HardDrive" { $bootdevice = "IDE" }
+        "Optical"   { $bootdevice = "CD" }
+        "Network"   { $bootdevice = "LegacyNetworkAdapter" }
+        "Default"   { $bootdevice = "IDE" }
+    } #switch
+} else {
+    # Determine boot device
+    Switch ((Select-Xml -xml $vmconfig -XPath "//boot").node.device0."#text") {
+        "HardDrive" { $bootdevice = "VHD" }
+        "Optical"   { $bootdevice = "CD" }
+        "Network"   { $bootdevice = "NetworkAdapter" }
+        "Default"   { $bootdevice = "VHD" }
+    } #switch
+}
 
 # Determine secure boot options
 $secure_boot_enabled = (Select-Xml -xml $vmconfig -XPath "//secure_boot_enabled").Node."#text"
@@ -97,12 +109,16 @@ $secure_boot_enabled = (Select-Xml -xml $vmconfig -XPath "//secure_boot_enabled"
 
 $vm_params = @{
     Name = $vm_name
-    Generation = $generation
     NoVHD = $True
     MemoryStartupBytes = $MemoryStartupBytes
     SwitchName = $switchname
     BootDevice = $bootdevice
     ErrorAction = "Stop"
+}
+
+# Generation parameter was added in ps v4
+if((get-command New-VM).Parameters.Keys.Contains("generation")) {
+    $vm_params.Generation = $generation
 }
 
 # Create the VM using the values in the hash map
@@ -130,6 +146,14 @@ if ($notes) {
     $more_vm_params.Add("Notes",$notes)
 }
 
+if ($auto_start_action) {
+    $more_vm_params.Add("AutomaticStartAction",$auto_start_action)
+}
+
+if ($auto_stop_action) {
+    $more_vm_params.Add("AutomaticStopAction",$auto_stop_action)
+}
+
 # Set the values on the VM
 $vm | Set-VM @more_vm_params -Passthru
 
@@ -138,12 +162,12 @@ $controllers = Select-Xml -xml $vmconfig -xpath "//*[starts-with(name(.),'contro
 
 # Only set EFI secure boot for Gen 2 machines, not gen 1
 if ($generation -ne 1) {
-	# Set EFI secure boot 
-	if ($secure_boot_enabled -eq "True") {
-		Set-VMFirmware -VM $vm -EnableSecureBoot On
-	}  else {
-		Set-VMFirmware -VM $vm -EnableSecureBoot Off
-	}
+    # Set EFI secure boot 
+    if ($secure_boot_enabled -eq "True") {
+        Set-VMFirmware -VM $vm -EnableSecureBoot On
+    }  else {
+        Set-VMFirmware -VM $vm -EnableSecureBoot Off
+    }
 }
 
 # A regular expression pattern to pull the number from controllers

@@ -1,7 +1,11 @@
+require "vagrant/util/presence"
+
 module VagrantPlugins
   module Chef
     module Config
       class Base < Vagrant.plugin("2", :config)
+        include Vagrant::Util::Presence
+
         # The path to Chef's bin/ directory.
         # @return [String]
         attr_accessor :binary_path
@@ -10,6 +14,12 @@ module VagrantPlugins
         # provisioner command.
         # @return [String]
         attr_accessor :binary_env
+
+        # The name of the Chef project to install. This is "chef" for the Chef
+        # Client or "chefdk" for the Chef Development Kit. Other product names
+        # may be available as well.
+        # @return [String]
+        attr_accessor :product
 
         # Install Chef on the system if it does not exist. Default is true.
         # This is a trinary attribute (it can have three values):
@@ -26,9 +36,11 @@ module VagrantPlugins
         # @return [String, Symbol]
         attr_accessor :log_level
 
-        # Install a prerelease version of Chef.
-        # @return [true, false]
-        attr_accessor :prerelease
+        # The channel from which to download Chef. Currently known values are
+        # "current" and "stable", but more may be added in the future. The
+        # default is "stable".
+        # @return [String]
+        attr_accessor :channel
 
         # The version of Chef to install. If Chef is already installed on the
         # system, the installed version is compared with the requested version.
@@ -52,25 +64,37 @@ module VagrantPlugins
         # @return [String]
         attr_accessor :installer_download_path
 
+        # @deprecated
+        def prerelease=(value)
+          STDOUT.puts <<-EOH
+[DEPRECATED] The configuration `chef.prerelease' has been deprecated. Please use
+`chef.channel' instead. The default value for channel is "stable", which
+includes the latest published versions of the Chef Client. You can choose to use
+prerelease versions by setting the channel to "current".
+EOH
+        end
+
         def initialize
           super
 
           @binary_path = UNSET_VALUE
           @binary_env  = UNSET_VALUE
+          @product     = UNSET_VALUE
           @install     = UNSET_VALUE
           @log_level   = UNSET_VALUE
-          @prerelease  = UNSET_VALUE
+          @channel     = UNSET_VALUE
           @version     = UNSET_VALUE
           @installer_download_path = UNSET_VALUE
         end
 
         def finalize!
-          @binary_path = nil     if @binary_path == UNSET_VALUE
-          @binary_env  = nil     if @binary_env == UNSET_VALUE
-          @install     = true    if @install == UNSET_VALUE
-          @log_level   = :info   if @log_level == UNSET_VALUE
-          @prerelease  = false   if @prerelease == UNSET_VALUE
-          @version     = :latest if @version == UNSET_VALUE
+          @binary_path = nil       if @binary_path == UNSET_VALUE
+          @binary_env  = nil       if @binary_env == UNSET_VALUE
+          @product     = "chef"    if @product == UNSET_VALUE
+          @install     = true      if @install == UNSET_VALUE
+          @log_level   = :info     if @log_level == UNSET_VALUE
+          @channel     = "stable"  if @channel == UNSET_VALUE
+          @version     = :latest   if @version == UNSET_VALUE
           @installer_download_path = nil  if @installer_download_path == UNSET_VALUE
 
           # Make sure the install is a symbol if it's not a boolean
@@ -93,17 +117,11 @@ module VagrantPlugins
         def validate_base(machine)
           errors = _detected_errors
 
-          if missing?(log_level)
+          if !present?(log_level)
             errors << I18n.t("vagrant.provisioners.chef.log_level_empty")
           end
 
           errors
-        end
-
-        # Determine if the given string is "missing" (blank)
-        # @return [true, false]
-        def missing?(obj)
-          obj.to_s.strip.empty?
         end
       end
     end

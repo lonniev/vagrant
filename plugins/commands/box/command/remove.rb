@@ -14,7 +14,7 @@ module VagrantPlugins
             o.separator "Options:"
             o.separator ""
 
-            o.on("-f", "--force", "Destroy without confirmation.") do |f|
+            o.on("-f", "--force", "Remove without confirmation.") do |f|
               options[:force] = f
             end
 
@@ -26,6 +26,10 @@ module VagrantPlugins
             o.on("--box-version VERSION", String,
                  "The specific version of the box to remove") do |v|
               options[:version] = v
+            end
+
+            o.on("--all", "Remove all available versions of the box") do |a|
+              options[:all] = a
             end
           end
 
@@ -50,6 +54,7 @@ module VagrantPlugins
             box_provider: options[:provider],
             box_version:  options[:version],
             force_confirm_box_remove: options[:force],
+            box_remove_all_versions: options[:all],
           })
 
           # Success, exit status 0

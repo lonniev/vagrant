@@ -65,13 +65,27 @@ describe VagrantPlugins::Kernel_V2::VMConfig do
       subject.finalize!
       assert_valid
     end
+
+    it "is invalid if clone is set" do
+      subject.clone = "foo"
+      subject.finalize!
+      assert_invalid
+    end
   end
 
   context "#box_check_update" do
     it "defaults to true" do
-      subject.finalize!
+      with_temp_env("VAGRANT_BOX_UPDATE_CHECK_DISABLE" => "") do
+        subject.finalize!
+        expect(subject.box_check_update).to be(true)
+      end
+    end
 
-      expect(subject.box_check_update).to be_true
+    it "is false if VAGRANT_BOX_UPDATE_CHECK_DISABLE is set" do
+      with_temp_env("VAGRANT_BOX_UPDATE_CHECK_DISABLE" => "1") do
+        subject.finalize!
+        expect(subject.box_check_update).to be(false)
+      end
     end
   end
 
@@ -167,7 +181,7 @@ describe VagrantPlugins::Kernel_V2::VMConfig do
       subject.communicator = "winrm"
       subject.finalize!
       n = subject.networks
-      expect(n.length).to eq(2)
+      expect(n.length).to eq(3)
 
       expect(n[0][0]).to eq(:forwarded_port)
       expect(n[0][1][:guest]).to eq(5985)
@@ -180,6 +194,32 @@ describe VagrantPlugins::Kernel_V2::VMConfig do
       expect(n[1][1][:host]).to eq(55986)
       expect(n[1][1][:host_ip]).to eq("127.0.0.1")
       expect(n[1][1][:id]).to eq("winrm-ssl")
+    end
+
+    it "forwards ssh even if the communicator is winrm" do
+      subject.communicator = "winrm"
+      subject.finalize!
+      n = subject.networks
+      expect(n.length).to eq(3)
+
+      expect(n[0][0]).to eq(:forwarded_port)
+      expect(n[0][1][:guest]).to eq(5985)
+      expect(n[0][1][:host]).to eq(55985)
+      expect(n[0][1][:host_ip]).to eq("127.0.0.1")
+      expect(n[0][1][:id]).to eq("winrm")
+
+      expect(n[1][0]).to eq(:forwarded_port)
+      expect(n[1][1][:guest]).to eq(5986)
+      expect(n[1][1][:host]).to eq(55986)
+      expect(n[1][1][:host_ip]).to eq("127.0.0.1")
+      expect(n[1][1][:id]).to eq("winrm-ssl")
+
+      expect(n[2][0]).to eq(:forwarded_port)
+      expect(n[2][1][:guest]).to eq(22)
+      expect(n[2][1][:host]).to eq(2222)
+      expect(n[2][1][:host_ip]).to eq("127.0.0.1")
+      expect(n[2][1][:id]).to eq("ssh")
+
     end
 
     it "allows overriding SSH" do
@@ -198,25 +238,25 @@ describe VagrantPlugins::Kernel_V2::VMConfig do
     it "allows overriding WinRM" do
       subject.communicator = :winrm
       subject.network "forwarded_port",
-        guest: 22, host: 14100, id: "winrm"
+        guest: 5985, host: 14100, id: "winrm"
       subject.finalize!
 
       winrm_network = find_network 'winrm'
-      expect(winrm_network[:guest]).to eq(22)
+      expect(winrm_network[:guest]).to eq(5985)
       expect(winrm_network[:host]).to eq(14100)
       expect(winrm_network[:id]).to eq("winrm")
     end
 
     it "allows overriding WinRM SSL" do
-      subject.communicator = :winrmssl
+      subject.communicator = :winrm
       subject.network "forwarded_port",
-        guest: 22, host: 14100, id: "winrmssl"
+        guest: 5986, host: 14100, id: "winrm-ssl"
       subject.finalize!
 
-      winrmssl_network = find_network 'winrmssl'
-      expect(winrmssl_network[:guest]).to eq(22)
+      winrmssl_network = find_network 'winrm-ssl'
+      expect(winrmssl_network[:guest]).to eq(5986)
       expect(winrmssl_network[:host]).to eq(14100)
-      expect(winrmssl_network[:id]).to eq("winrmssl")
+      expect(winrmssl_network[:id]).to eq("winrm-ssl")
     end
 
     it "turns all forwarded port ports to ints" do
